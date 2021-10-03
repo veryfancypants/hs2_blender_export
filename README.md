@@ -1,0 +1,1 @@
+# hs2_blender_export
