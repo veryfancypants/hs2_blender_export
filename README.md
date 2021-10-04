@@ -52,7 +52,8 @@ Manual rigging route:
 * Male characters aren't textured correctly (need to create separate materials for them)
 * Tongue and teeth are inserted into the scene but not textured or properly placed
 * Produced characters have no pubic hair
-* No support of characters with custom meshes 
+* No support of characters with custom meshes; in particular, will fail to assemble correctly if it finds more than 3 pieces in the head mesh
+* It will have a shot at automatic texturing of clothing and hair, but the result is going to be very crude
 
 Automatic rigging route:
 

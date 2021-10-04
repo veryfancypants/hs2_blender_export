@@ -10,11 +10,14 @@ def ShowMessageBox(message = "", title = "Message Box", icon = 'INFO'):
     bpy.context.window_manager.popup_menu(draw, title = title, icon = icon)
 
 
-fbx="C:\\temp\\HS2\\Export\\20211004011956_Okuta_Yuna\\Okuta_Yuna.fbx"
-path="C:\\temp\\HS2\\Export\\20211004011956_Okuta_Yuna\\Textures\\"
+path="C:\\temp\\HS2\\Export\\20211004041049_Haruka_Sawamura_(o)\\"
+fbx=path+"Haruka_Sawamura_(o).fbx"
+
 suffix='abcd'
 
-dump='C:\\Temp\\HS2\\UserData\\MaterialEditor\\okuta_yuna.txt'
+path += "Textures\\"
+
+dump='C:\\Temp\\HS2\\UserData\\MaterialEditor\\haruka.txt'
 dump=open(dump,'r').readlines()
 dump=[x.strip() for x in dump]
 if 'cf_J_Root' in dump[0]:
@@ -77,7 +80,10 @@ def set_tex(obj, node, x, y, alpha=None, csp=None):
         tex.alpha_mode='NONE'
     if csp!=None:
         tex.colorspace_settings.name=csp
-    chara[obj].materials[0].node_tree.nodes[node].image=tex
+    if obj in chara:
+        chara[obj].materials[0].node_tree.nodes[node].image=tex
+    else:
+        bpy.data.meshes[obj].materials[0].node_tree.nodes[node].image=tex
 
 sc = bpy.data.scenes[0]
 
@@ -240,7 +246,7 @@ def load_textures():
     while len(chara['o_eyelashes'].materials):
         chara['o_eyelashes'].materials.pop()
     chara['o_eyelashes'].materials.append(eyelash_mat)
-    set_tex('o_eyelashes', 'Image Texture', 'eyelashes', 'MainTex')    
+    set_tex('o_eyelashes', 'Image Texture', 'eyelashes', 'MainTex', csp='Non-Color')    
     
     eye_mat = bpy.data.materials['Eyes'].copy()
     eye_mat.name = 'Eyes_' + suffix
@@ -265,8 +271,8 @@ def load_textures():
     set_tex('o_head', 'Image Texture.003', 'head', 'DetailGlossMap', csp='Non-Color')
     set_tex('o_head', 'Image Texture.006', 'head', 'BumpMap2', csp='Non-Color')
     set_tex('o_head', 'Image Texture.007', 'head', 'BumpMap', csp='Non-Color')
-    head_mat.node_tree.nodes['Value'].outputs[0].default_value=0.0
-    head_mat.node_tree.nodes['Value.001'].outputs[0].default_value=0.0
+    #head_mat.node_tree.nodes['Value'].outputs[0].default_value=0.0
+    #head_mat.node_tree.nodes['Value.001'].outputs[0].default_value=0.0
 
     
     forehead_mat = bpy.data.materials['Eyebrows'].copy()
@@ -302,6 +308,31 @@ def load_textures():
     chara['r_booby'].materials.append(booby_mat)
     set_tex('l_booby', 'Image Texture', 'body', 'Texture2')    
     bpy.data.objects['l_booby']['BoobyIndex']=1.0
+
+    hair_mat = bpy.data.materials['test_hair'].copy()
+    hair_mat.name = 'Hair_' + suffix
+    for x in bpy.data.objects.keys():
+        if 'hair' in x:
+            o = bpy.data.meshes[x]
+            while len(o.materials):
+                o.materials.pop()
+            o.materials.append(hair_mat)
+            
+    for x in bpy.data.objects.keys():
+        if x.startswith('o_') and not x in chara:
+            print(x)
+            mesh = bpy.data.objects[x].data
+            m = mesh.materials[0]
+            n = m.name
+            if '.' in n:
+                n = n.split('.')[0]            
+            while len(mesh.materials):
+                mesh.materials.pop()
+            mat = bpy.data.materials['Clothing'].copy()
+            mesh.materials.append(mat)
+            set_tex(mesh.name, 'Image Texture', n, 'MainTex', csp='Non-Color')
+            set_tex(mesh.name, 'Image Texture.001', n, 'DetailGlossMap', csp='Non-Color')
+
 
 def fixup_head():
     bpy.ops.object.select_all(action='DESELECT')
@@ -403,20 +434,18 @@ def import_bodyparts():
             or id_data.name.startswith('f_') \
             or id_data.name.startswith('cf_J') \
             or id_data.name.startswith('HS2_') \
-            or id_data.name.startswith('N_'):
+            or id_data.name.startswith('N_') \
+            or (bpy_data_iter==bpy.data.objects and id_data.type=='EMPTY'):                
                 bpy_data_iter.remove(id_data)
     bpy.data.objects.remove(bpy.data.objects['o_namida'])
-    bpy.data.objects.remove(bpy.data.objects['o_body_cf']) # it's an Empty 
-    #if 'o_body_cf.001' in bpy.data.objects:
+    if 'o_body_cf' in bpy.data.objects:
+        bpy.data.objects.remove(bpy.data.objects['o_body_cf']) # it's an Empty 
     bpy.data.objects['o_body_cf.001'].name='o_body_cf'
-    
+    #TODO: delete all the Empty objects and hierarchies    
     if not 'o_head' in bpy.data.meshes:
         heads=[x for x in bpy.data.meshes.keys() if x.startswith('o_head')]
         if len(heads)==1:
             bpy.data.meshes[heads[0]].name='o_head'
-    #bpy.data.objects['o_head'].name='o_body_cf'
-    #if 'p_cf_body_00' in bpy.data.objects:
-    #    bpy.data.objects.remove(bpy.data.objects['p_cf_body_00'])
     arm = bpy.data.objects['Armature']
     body = arm.children[0]
     bpy.context.view_layer.objects.active = arm
@@ -472,42 +501,14 @@ def load_unity_dump():
                 m[1][0]*=-1
                 m[2][0]*=-1
                 m[3][0]*=-1
-                #root=mul4(m, [0,0,0,1])#[m[0][3],m[1][3],m[2][3],m[3][3]]
-                #print(name)
                 bone_pos[name]=m
-                """
-                root = mul4(pm, root)
-                root[0]/=root[3]
-                root[1]/=root[3]
-                root[2]/=root[3]
-                    bone_pos[name]=(root[0],root[1],root[2])
-                sc=[0,0,0]
-                for i in range(3):
-                    y=[0,0,0,1]
-                    y[i]=1
-                    y=mul4(m, y)
-                    y = mul4(pm, y)
-                    y[0]/=y[3]
-                    y[1]/=y[3]
-                    y[2]/=y[3]
-                    sc[i]=y[i]-root[i]
-                    #print(root)
-                bone_scale[name]=sc
-                #print(name,root)
-                """
-    #        else:
-    #                print('No known parent for ', name)
 
 
 def reshape_armature(): 
     bpy.ops.object.mode_set(mode='OBJECT')    
     arm = bpy.data.objects['Armature']
-    #body = arm.children[0]
-    #scene_bones=arm.data.bones.keys()                
     bpy.context.view_layer.objects.active = arm
     bpy.ops.object.mode_set(mode='EDIT')
-    #bpy.ops.armature.select_all(action='SELECT')
-    #bones = bpy.context.selected_bones
     fix_bone_directions={
     'cf_J_Kosi02': (0,-1,0),
     'cf_J_Toes01_L': (0,0,1),
@@ -613,16 +614,12 @@ stitch_head_to_torso()
 load_unity_dump()
 reshape_armature()            
 
+# TODO: better texturing for all cloth and hair objects
 
 bpy.ops.object.mode_set(mode='OBJECT')
 light_data = bpy.data.lights.new('light', type='POINT')
 light = bpy.data.objects.new('light', light_data)
 bpy.context.collection.objects.link(light)
-light.location = (10, -10, 10)
+light.location = (5, -5, 10)
 light.data.energy=2000.0
 
-# Known problems:
-
-# Bump-maps are displayed incorrectly (MeshExplorer gamma-corrects them and they no longer work with my material;
-# alternate 'converted' normal maps don't work either)
-# 
