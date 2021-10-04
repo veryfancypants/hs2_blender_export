@@ -18,27 +18,31 @@ Go through the materials and tweak the settings. In particular, adjust eye/eyebr
 
 Scale the character down to human size (scale factor 0.12 or so) and then move on to rigging the character any way you want (e.g. with metarig).
 
-2. Automatic rigging route
+2. Automatic rigging route (WORK IN PROGRESS)
 
 The advantage of this route is that you get the exact rig used by the game. The game rig gives you realistic range of motion in knees and hips that is very hard to achieve with metarig. You get full armature + vertex weights + bone constraints out of the box.
 
 It would also, in principle, be possible to export poses and animations from the game.
 
-The downside is that you get a fully custom rig. No pretty metarig controls until someone (read: me) implements it. So far I don't even have the head, and there's no IK support.
+In addition, you get hair, clothes, and accessories (though as far as how accurate they will be, YMMV.)
+
+The downside is that you get a fully custom rig. No pretty metarig controls until someone (read: me) implements it. So there are no controls, no IK support, and only the lower body has been reviewed.
+
+Install Grey's MeshExporter. (It comes as 'optional' with HS2 BetterRepack.)
 
 Launch Studio Neo. Load the character. Hit F1, find Runtime Unity Editor, bind a key to open it.
 
 Put the character in T-pose (unlike route 1, don't bend any limbs.) Hit the key for Runtime Unity Editor. In the "Scene Unity Editor", find Common Space -> ChaF_001 -> BodyTop -> p_cf_anim -> cf_J_Root. (If it is a male character, it'll be ChaM_001.) Select cf_J_Root and hit 'dump'. Save the text file.
 
-Export the objects and the textures as in route 1, but skip the body .obj.
+Use MeshExporter to export everything. Do ask for converted bump maps. Don't ask to pack png's into the fbx. 
 
-Locate the unbaked mesh for the character. The best process for this step is TBD. For now I've included the standard "sexless" mesh from the game (default_rig_body.fbx) and the uncensored BP Sac.Innie1 mesh. Others can be pulled out of their zipmods with SB3U, instructions can be found elsewhere. (Differences are normally limited to nipples and the groin area.)
+Open prefab_materials_meshexporter.blend in Blender. 
 
-Import the FBX into Blender. 
+Load meshexporter.py. Point the 'dump' variable at the text file you dumped from Runtime Unity Editor. Point 'fbx' and 'path' variables at the MeshExporter dump. Run the script. 
 
-Load convert_armature.py, point the 'dump' variable at the text file you dumped from Runtime Unity Editor, run the script. It will scale the mesh to the exact dimensions of the character, prettify the rig, sort the bones into several layers for ease of use, and add several bone constraints that you need for proper knee and hip function.
+It will clean up the scene, set up the materials, prettify the rig, sort the bones into several layers for ease of use, and add several bone constraints that you need for proper knee and hip function.
 
-Proceed with texturing (the script from step 1 will work for this too in future, but it needs to be adapted first.)
+Tweak the texture settings as in route 1.
 
 
 KNOWN ISSUES:
@@ -48,11 +52,13 @@ Manual rigging route:
 * Male characters aren't textured correctly (need to create separate materials for them)
 * Tongue and teeth are inserted into the scene but not textured or properly placed
 * Produced characters have no pubic hair
+* No support of characters with custom meshes 
 
 Automatic rigging route:
 
 * Work in progress, many missing features
-
-
+* Bump mapping is disabled because MeshExplorer messes with gamma in bump maps, making them unusable without some postprocessing, and I need to sort out the kind of postprocessing needed
+* No support of male characters 
+* All of the issues of the manual route
 
 
