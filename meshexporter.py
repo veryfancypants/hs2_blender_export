@@ -10,13 +10,19 @@ def ShowMessageBox(message = "", title = "Message Box", icon = 'INFO'):
     bpy.context.window_manager.popup_menu(draw, title = title, icon = icon)
 
 
-fbx="C:\\temp\\HS2\\Export\\20211003222535_Mia_Mod\\Mia_Mod.fbx"
-path="C:\\temp\\HS2\\Export\\20211003222535_Mia_Mod\\Textures\\"
+fbx="C:\\temp\\HS2\\Export\\20211004011956_Okuta_Yuna\\Okuta_Yuna.fbx"
+path="C:\\temp\\HS2\\Export\\20211004011956_Okuta_Yuna\\Textures\\"
 suffix='abcd'
 
-dump='C:\\Temp\\HS2\\UserData\\MaterialEditor\\dump3.txt'
+dump='C:\\Temp\\HS2\\UserData\\MaterialEditor\\okuta_yuna.txt'
 dump=open(dump,'r').readlines()
 dump=[x.strip() for x in dump]
+if 'cf_J_Root' in dump[0]:
+    dump[0]='cf_J_Root--UnityEngine.GameObject'
+else:
+    print('ERROR: Could not parse the dump file')
+
+
 
 
 """
@@ -403,6 +409,12 @@ def import_bodyparts():
     bpy.data.objects.remove(bpy.data.objects['o_body_cf']) # it's an Empty 
     #if 'o_body_cf.001' in bpy.data.objects:
     bpy.data.objects['o_body_cf.001'].name='o_body_cf'
+    
+    if not 'o_head' in bpy.data.meshes:
+        heads=[x for x in bpy.data.meshes.keys() if x.startswith('o_head')]
+        if len(heads)==1:
+            bpy.data.meshes[heads[0]].name='o_head'
+    #bpy.data.objects['o_head'].name='o_body_cf'
     #if 'p_cf_body_00' in bpy.data.objects:
     #    bpy.data.objects.remove(bpy.data.objects['p_cf_body_00'])
     arm = bpy.data.objects['Armature']
@@ -417,13 +429,17 @@ bone_pos={}
 bone_w2l={}
 bone_parent={}
 #bone_scale={}
-name=''
 root_pos=[0,0,0]
 
 def mul4(x, y):
     return [sum([x[i][j]*y[j] for j in range(4)]) for i in range(4)]
 
 def load_unity_dump():
+    global root_pos
+    global bone_pos
+    name=''
+    global bone_parent
+    global bone_w2l
     for n in range(len(dump)):
         x=dump[n]
         if x.endswith('--UnityEngine.GameObject'):
@@ -446,6 +462,7 @@ def load_unity_dump():
             else:
                 if name=='cf_J_Root':
                     root_pos = [m[0][3],m[1][3],m[2][3]]
+                    print('Root ', root_pos)
                 m[0][3]-=root_pos[0]
                 m[1][3]-=root_pos[1]
                 m[2][3]-=root_pos[2]
@@ -603,7 +620,6 @@ light = bpy.data.objects.new('light', light_data)
 bpy.context.collection.objects.link(light)
 light.location = (10, -10, 10)
 light.data.energy=2000.0
-
 
 # Known problems:
 
