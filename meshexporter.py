@@ -10,14 +10,14 @@ def ShowMessageBox(message = "", title = "Message Box", icon = 'INFO'):
     bpy.context.window_manager.popup_menu(draw, title = title, icon = icon)
 
 
-path="C:\\temp\\HS2\\Export\\20211004041049_Haruka_Sawamura_(o)\\"
-fbx=path+"Haruka_Sawamura_(o).fbx"
+path="C:\\temp\\HS2\\Export\\20211005004423_BR-Chan\\"
+fbx=path+"BR-Chan.fbx"
 
 suffix='abcd'
 
 path += "Textures\\"
 
-dump='C:\\Temp\\HS2\\UserData\\MaterialEditor\\haruka.txt'
+dump='C:\\Temp\\HS2\\UserData\\MaterialEditor\\br_chan_dump.txt'
 dump=open(dump,'r').readlines()
 dump=[x.strip() for x in dump]
 if 'cf_J_Root' in dump[0]:
@@ -269,8 +269,8 @@ def load_textures():
     set_tex('o_head', 'Image Texture', 'head', 'MainTex', alpha='NONE', csp='Non-Color')
     set_tex('o_head', 'Image Texture.002', 'head', 'DetailMainTex', csp='Non-Color')
     set_tex('o_head', 'Image Texture.003', 'head', 'DetailGlossMap', csp='Non-Color')
-    set_tex('o_head', 'Image Texture.006', 'head', 'BumpMap2', csp='Non-Color')
-    set_tex('o_head', 'Image Texture.007', 'head', 'BumpMap', csp='Non-Color')
+    set_tex('o_head', 'Image Texture.006', 'head', 'BumpMap2_converted', csp='Non-Color')
+    set_tex('o_head', 'Image Texture.007', 'head', 'BumpMap_converted', csp='Non-Color')
     #head_mat.node_tree.nodes['Value'].outputs[0].default_value=0.0
     #head_mat.node_tree.nodes['Value.001'].outputs[0].default_value=0.0
 
@@ -291,8 +291,8 @@ def load_textures():
     set_tex(bn, 'Image Texture.005', 'body', 'DetailGlossMap', csp='Non-Color')
     set_tex(bn, 'Image Texture.002', 'body', 'BumpMap_converted', csp='Non-Color')
     set_tex(bn, 'Image Texture.003', 'body', 'BumpMap2_converted', csp='Non-Color')
-    body_mat.node_tree.nodes['Value'].outputs[0].default_value=0.0
-    body_mat.node_tree.nodes['Value.001'].outputs[0].default_value=0.0
+    #body_mat.node_tree.nodes['Value'].outputs[0].default_value=0.0
+    #body_mat.node_tree.nodes['Value.001'].outputs[0].default_value=0.0
 
     while len(chara['nails'].materials):
         chara['nails'].materials.pop()
@@ -306,7 +306,7 @@ def load_textures():
     while len(chara['r_booby'].materials):
         chara['r_booby'].materials.pop()
     chara['r_booby'].materials.append(booby_mat)
-    set_tex('l_booby', 'Image Texture', 'body', 'Texture2')    
+    set_tex('l_booby', 'Image Texture', 'body', 'Texture2', csp='Non-Color')    
     bpy.data.objects['l_booby']['BoobyIndex']=1.0
 
     hair_mat = bpy.data.materials['test_hair'].copy()
@@ -412,6 +412,7 @@ def stitch_head_to_torso():
     bpy.ops.object.select_all(action='DESELECT')
     bpy.context.view_layer.objects.active = bpy.data.objects['body']
     bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_all(action='DESELECT')
     bpy.ops.mesh.select_non_manifold()
     bpy.ops.mesh.remove_doubles(threshold=max(error*1.5, 0.001), use_unselected=True)
     bpy.ops.mesh.select_more()
@@ -511,19 +512,36 @@ def reshape_armature():
     bpy.ops.object.mode_set(mode='EDIT')
     fix_bone_directions={
     'cf_J_Kosi02': (0,-1,0),
-    'cf_J_Toes01_L': (0,0,1),
-    'cf_J_Toes01_R': (0,0,1),
-
     'cf_J_Siri_L': (0,0,-1),
     'cf_J_Siri_R': (0,0,-1),
     'cf_J_Siri_s_L': (0,0,-1),
     'cf_J_Siri_s_R': (0,0,-1),
-    
-    'cf_J_ArmUp00_L': (1,0,0),
-    'cf_J_ArmUp00_R': (-1,0,0),
-    'cf_J_ArmLow01_L': (1,0,0),
-    'cf_J_ArmLow01_R': (-1,0,0),
     }
+    """
+    BONE LAYERS
+    General principles:
+    0-14: anything the user needs to pose the character
+    15: anything that seems totally useless, and anything unclassified
+    16-30: soft tissues (not used to pose, but may be used to customize the character)
+    31: all bones
+    
+    There's no IK yet but a layer may need to be carved out for IK bones.
+    
+    Currently in use:    
+    0: left leg FK
+    1: right leg FK
+    2: left arm FK
+    3: right arm FK
+    4: left arm FK
+    5: right arm FK
+    6: torso
+    7: toes
+    12: face
+    13: breasts
+    14: groin  
+    28: face soft
+
+    """
     for x in bpy.context.object.data.edit_bones:
         if x.name in bone_pos:
             p = Matrix(bone_pos[x.name])
@@ -536,20 +554,63 @@ def reshape_armature():
             x.head.y=p[1][3]
             x.head.z=p[2][3]            
             array=[False]*32
-            array[31]=True
+            array[15] = True
             side = (1 if x.name[-1]=='R' else 0)
-            if x.name=='cf_N_height':
-                array[15]=True
-                array[31]=False
-            if x.name[:-1] in ['cf_J_LegUp00_', 'cf_J_LegLow01_', 'cf_J_LegLowRoll_', 'cf_J_Foot01_', 'cf_J_Foot02_', 'cf_J_Toes01_', 'cf_J_SiriDam_', 'cf_J_Siri_']:
+            #if x.name in ['cf_J_Root', 'cf_N_height', 'cf_J_Hips', 'cf_J_Kosi03', 'cf_J_Kosi03_s']:
+            #    array[15]=True
+            #if x.name[:-1] in ['cf_J_ShoulderIK_', 'cf_J_Siriopen_s_']:
+            #    array[15]=True
+            if x.name[:-1] in ['cf_J_LegUp00_', 'cf_J_LegLow01_', 'cf_J_LegLowRoll_', 'cf_J_Foot01_', 'cf_J_Foot02_', 
+                'cf_J_SiriDam_', 'cf_J_Siri_', 'cf_J_SiriDam01_']:
                 array[0+side]=True # Leg FK
-            if x.name[:-1] in ['cf_J_LegLow01_s_', 'cf_J_LegLow02_s_', 'cf_J_LegUp03_s_',           'cf_J_LegKnee_back_', 'cf_J_LegKnee_back_s_', 'cf_J_Siri_s_', 'cf_J_LegKnee_dam_', 
-            'cf_J_LegKnee_low_s_', 'cf_J_LegUpDam_', 'cf_J_LegUpDam_s_']:
+            if x.name[:-1] in ['cf_J_LegLow01_s_', 'cf_J_LegLow02_s_', 'cf_J_LegUp03_s_', 'cf_J_LegKnee_back_',
+                'cf_J_LegKnee_back_s_', 'cf_J_Siri_s_', 'cf_J_LegKnee_dam_', 'cf_J_LegKnee_low_s_', 'cf_J_LegUpDam_',
+                'cf_J_LegUpDam_s_', 'cf_J_LegUp01_', 'cf_J_LegUp01_s_', 'cf_J_LegUp02_', 'cf_J_LegUp02_s_', 
+                'cf_J_LegUp03_', 'cf_J_LegUp03_s_', 'cf_J_LegLow03_', 'cf_J_LegLow03_s_']:
                 array[16+side]=True # Leg soft
-            if x.name[:-1] in ['cf_J_Shoulder_', 'cf_J_ArmUp00_', 'cf_J_ArmLow01_', 'cf_J_Hand_dam_']:
+            if x.name[:-1] in ['cf_J_Shoulder_', 'cf_J_ArmUp00_', 'cf_J_ArmLow01_', 'cf_J_Hand_']:
                 array[2+side]=True # Arm FK
-            if x.name[:-1] in ['cf_J_Shoulder02_s_', 'cf_J_ArmUp03_s_', 'cf_J_ArmLow01_s_', 'cf_J_Hand_Wrist_s_', 'cf_J_Hand_s_']:
+            if x.name[:-1] in ['cf_J_Shoulder02_s_', 'cf_J_ArmUp01_s_', 'cf_J_ArmUp02_s_', 'cf_J_ArmElbo_low_s_', 
+                'cf_J_ArmUp03_s_', 'cf_J_ArmLow01_s_', 'cf_J_Hand_Wrist_s_', 'cf_J_Hand_s_',
+                'cf_J_ArmUp01_dam_', 'cf_J_ArmUp02_dam_', 'cf_J_ArmUp03_dam_', 'cf_J_ArmElboura_dam_', 'cf_J_ArmElboura_s_', 
+                'cf_J_ArmElbo_dam_01_', 'cf_J_ArmLow02_dam_', 'cf_J_ArmLow02_s_', 'cf_J_Hand_Wrist_dam_', 'cf_J_Hand_dam_']:
                 array[18+side]=True # Arm soft
+            if x.name in ['cf_J_Kosi02', 'cf_J_Kosi01', 'cf_J_Spine01', 'cf_J_Spine02', 'cf_J_Spine03', 'cf_J_Neck', 'cf_J_Head']:
+                array[6]=True # Torso
+            if x.name in ['cf_J_Kosi02_s', 'cf_J_Kosi01_s', 'cf_J_Spine01_s', 'cf_J_Spine02_s', 'cf_J_Spine03_s', 'cf_J_Neck_s', 'cf_J_Head_s']:
+                array[22]=True # Torso soft
+            if x.name[:-1] in [
+                'cf_J_Hand_Thumb01_', 'cf_J_Hand_Index01_',  'cf_J_Hand_Middle01_',  'cf_J_Hand_Ring01_',  'cf_J_Hand_Little01_', 
+                'cf_J_Hand_Thumb02_', 'cf_J_Hand_Index02_',  'cf_J_Hand_Middle02_',  'cf_J_Hand_Ring02_',  'cf_J_Hand_Little02_', 
+                'cf_J_Hand_Thumb03_', 'cf_J_Hand_Index03_',  'cf_J_Hand_Middle03_',  'cf_J_Hand_Ring03_',  'cf_J_Hand_Little03_']:
+                array[4+side]=True
+            if x.name[:-1] in ['cf_J_Toes01_', 'cf_J_Toes_Long1_', 'cf_J_Toes_Hallux1_', 'cf_J_Toes_Middle1_', 'cf_J_Toes_Ring1_', 'cf_J_Toes_Pinky1_', 
+                               'cf_J_Toes_Long2_', 'cf_J_Toes_Hallux2_', 'cf_J_Toes_Middle2_', 'cf_J_Toes_Ring2_', 'cf_J_Toes_Pinky2_']:
+                array[7]=True
+            if 'Mune' in x.name:
+                array[29 if ('_s' in x.name) else 13]=True                
+            if x.name in ['cf_J_Ana', 'cf_J_Kokan']:
+                array[14]=True
+            if ('Vagina' in x.name) or ('_dan' in x.name):
+                array[14]=True
+            if x.name in ['cf_J_Mouthup', 'cf_J_MouthLow', 'cf_J_MouthMove']:
+                array[12]=True
+            if x.name[:-1] in ['cf_J_Mouth_', 'cf_J_CheekUp_', 'cf_J_Eye01_', 'cf_J_Eye02_', 'cf_J_Eye03_', 'cf_J_Eye04_', 
+                'cf_J_eye_rs_', 'cf_J_Mayu_', 'cf_J_look_', 'cf_J_EyePos_rz_', 'cf_J_Eye_r_']:
+                array[12]=True
+            if x.name in ['cf_J_ChinLow', 'cf_J_Chin_rs', 'cf_J_ChinTip_s', 'cf_J_NoseTip', 'cf_J_NoseBase_s', 'cf_J_MouthBase_tr', 
+                'cf_J_MouthCavity', 'cf_J_FaceLow_s', 'cf_J_MouthBase_s', 'cf_J_FaceLowBase', 'cf_J_FaceRoot', 'cf_J_FaceRoot_s', 'cf_J_FaceBase',
+                'cf_J_NoseBridge_t', 'cf_J_FaceUp_ty', 'cf_J_FaceUp_tz', 'cf_J_Nose_t', 'cf_J_Nose_tip', 'cf_J_NoseBase_trs',
+                'cf_J_Nose_r', 'cf_J_NoseBridge_s', 
+                ]:
+                array[28]=True
+            if x.name[:-1] in ['cf_J_CheekLow_', 'cf_J_NoseWing_tx_', 'cf_J_Eye01_s_', 'cf_J_Eye02_s_', 'cf_J_Eye03_s_', 'cf_J_Eye04_s_',
+                'cf_J_pupil_s_', 'cf_J_Eye_t_', 'cf_J_MayuTip_s_', 'cf_J_MayuMid_s_', 'cf_J_Eye_s_', 
+                'cf_J_EarUp_', 'cf_J_EarBase_s_', 'cf_J_EarLow_', 
+                ]:
+                array[28]=True
+            array[15] = any(array[:15]) or any(array[16:])
+            array[31] = True
             x.layers=array
                 
             fix_dir=None
@@ -557,10 +618,12 @@ def reshape_armature():
                 fix_dir=fix_bone_directions[x.name]
             elif array[0] or array[1] or array[16] or array[17]:
                 fix_dir=(0,-1,0)
-            elif array[2] or array[18]:
+            elif array[2] or array[18] or array[4]:
                 fix_dir=(1,0,0)
-            elif array[3] or array[19]:
+            elif array[3] or array[19] or array[5]:
                 fix_dir=(-1,0,0)
+            elif array[7]:
+                fix_dir=(0,0,1)
             if fix_dir!=None:
                 bone_length = bone_length.length * Vector(fix_dir)
             x.tail=x.head+bone_length      
@@ -570,14 +633,71 @@ def reshape_armature():
     bpy.ops.object.mode_set(mode='POSE')
     
     for n in ['cf_J_LegUp00_L', 'cf_J_LegLow01_L', 
-            'cf_J_LegUp00_R', 'cf_J_LegLow01_R']:
+            'cf_J_LegUp00_R', 'cf_J_LegLow01_R', 
+            'cf_J_LegLowRoll_L', 'cf_J_LegLowRoll_R']:
+        bone = arm.pose.bones[n]
+        bone.rotation_mode='YZX'
+
+    for n in ['cf_J_LegLow01_L', 'cf_J_LegLow01_R', 'cf_J_LegLowRoll_L', 'cf_J_LegLowRoll_R',
+        'cf_J_ArmUp00_L', 'cf_J_ArmUp00_R', 'cf_J_ArmLow01_L', 'cf_J_ArmLow01_R', 'cf_J_Hand_L', 'cf_J_Hand_R'
+        ]:
         bone = arm.pose.bones[n]
         bone.rotation_mode='XYZ'
+        bpy.types.ArmatureBones.active = bone
+        con = bone.constraints.new('LIMIT_ROTATION')
+        if 'Hand' in n:
+            con.min_x=-45.*3.14159/180.
+            con.max_x=45.*3.14159/180.
+            con.min_y=0
+            con.max_y=0
+            con.min_z=-100.*3.14159/180.
+            con.max_z=100.*3.14159/180.
+        elif 'ArmUp' in n:
+            bone.rotation_mode='XYZ'
+            # x is forward-back (should we allow this motion here or in the shoulder?)
+            con.min_x=-100.*3.14159/180.
+            con.max_x=100.*3.14159/180.
+            # twisting this bone turns the elbow
+            con.min_y=-90.*3.14159/180.
+            con.max_y=90.*3.14159/180.
+            # z is up-down
+            con.min_z=-100.*3.14159/180.
+            con.max_z=100.*3.14159/180.
+        elif 'ArmLow' in n:
+            con.min_x=0
+            con.max_x=170.*3.14159/180.
+            # twisting this bone turns the lower arm and the wrist; can't turn the wrist on its own
+            con.min_y=-90.*3.14159/180.
+            con.max_y=90.*3.14159/180.
+            # can't bend the elbow sideways
+            con.min_z=0
+            con.max_z=0
+        elif 'Roll' in n: 
+            con.min_x=0
+            con.max_x=0
+            con.min_y=-60.*3.14159/180.
+            con.max_y=60*3.14159/180.
+            con.min_z=0
+            con.max_z=0
+        else:
+            con.min_x=-170.*3.14159/180.
+            con.max_x=0
+            # in case we really need to (ideally, we'd just turn the hip, but the rig has its limits)
+            con.min_y=-45*3.14159/180.
+            con.max_y=45.*3.14159/180.
+            con.min_z=0
+            con.max_z=0
+        con.use_limit_x=True
+        con.use_limit_y=True
+        con.use_limit_z=True
+        con.owner_space='LOCAL'
         
+    # TODO: there may be more similar constraints for elbows/shoulders/wrists
     for n in ['cf_J_LegKnee_dam_L', 'cf_J_LegKnee_dam_R', 
             'cf_J_LegKnee_back_L', 'cf_J_LegKnee_back_R',
             'cf_J_SiriDam_L', 'cf_J_SiriDam_R',
             'cf_J_LegUpDam_L', 'cf_J_LegUpDam_R',
+            'cf_J_ArmElbo_dam_01_L', 'cf_J_ArmElbo_dam_01_R',
             ]:
         bone = arm.pose.bones[n]
         bone.rotation_mode='XYZ'
@@ -585,23 +705,51 @@ def reshape_armature():
         con = bone.constraints.new('COPY_ROTATION')
         con.mix_mode='ADD'
         con.target=arm
-        print(n)
-        if ('Siri' in n) or ('LegUp' in n):
+        con.owner_space='LOCAL'
+        con.target_space='LOCAL'
+        con.euler_order='YZX'
+        if ('Siri' in n):
             con.subtarget='cf_J_LegUp00_' + n[-1]
+            # the order of these two possibly matters, as does the Euler order
             con.use_x=True
+            con.use_y=False
+            con.use_z=False
+            con.influence=0.5
+                
+            con = bone.constraints.new('COPY_ROTATION')
+            con.mix_mode='ADD'
+            con.target=arm
+            con.subtarget='cf_J_LegUp00_' + n[-1]
+            con.use_x=False
             con.use_y=True
             con.use_z=True
-            # TODO: work out the exact influence and rotation order factors used by the game;
-            # the following is only a rough guess
-            con.influence=0.5 if ('Siri' in n) else 0.75
+            con.influence=0.2
+            con.owner_space='LOCAL'
+            con.target_space='LOCAL'
+        elif ('LegUp' in n):
+            con.subtarget='cf_J_LegUp00_' + n[-1]
+            con.use_x=True
+            con.use_y=False
+            con.use_z=True
+            con.influence=0.74
+        elif 'ArmElbo' in n:
+            con.subtarget='cf_J_ArmLow01_' + n[-1]
+            con.use_x=True
+            con.use_y=False
+            con.use_z=False
+            # rough guess
+            con.influence=0.5
         else:
             con.subtarget='cf_J_LegLow01_' + n[-1]
             con.use_x=True
             con.use_y=False
             con.use_z=False
             con.influence=1.0 if ('_back_' in n) else 0.5
-        con.owner_space='LOCAL'
-        con.target_space='LOCAL'
+        
+    arm.data.display_type = 'STICK'
+    arm.data.layers=[True,True,True,True] + [False]*28
+    arm.show_in_front = True
+    
 
 import_bodyparts()
 rebuild_head()
@@ -622,4 +770,3 @@ light = bpy.data.objects.new('light', light_data)
 bpy.context.collection.objects.link(light)
 light.location = (5, -5, 10)
 light.data.energy=2000.0
-

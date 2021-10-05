@@ -26,7 +26,7 @@ It would also, in principle, be possible to export poses and animations from the
 
 In addition, you get hair, clothes, and accessories (though as far as how accurate they will be, YMMV.)
 
-The downside is that you get a fully custom rig. No pretty metarig controls until someone (read: me) implements it. So there are no controls, no IK support, and only the lower body has been reviewed.
+The downside is that you get a fully custom rig. No pretty metarig controls until someone (read: me) implements it. So far, there are no controls and no IK support.
 
 Install Grey's MeshExporter. (It comes as 'optional' with HS2 BetterRepack.)
 
@@ -44,6 +44,7 @@ It will clean up the scene, set up the materials, prettify the rig, sort the bon
 
 Tweak the texture settings as in route 1.
 
+Demo: https://www.youtube.com/watch?v=RYYCRgpvDUo
 
 KNOWN ISSUES:
 
@@ -53,13 +54,14 @@ Manual rigging route:
 * Tongue and teeth are inserted into the scene but not textured or properly placed
 * Produced characters have no pubic hair
 * No support of characters with custom meshes; in particular, will fail to assemble correctly if it finds more than 3 pieces in the head mesh
-* It will have a shot at automatic texturing of clothing and hair, but the result is going to be very crude
 
 Automatic rigging route:
 
-* Work in progress, many missing features
-* Bump mapping is disabled because MeshExplorer messes with gamma in bump maps, making them unusable without some postprocessing, and I need to sort out the kind of postprocessing needed
+* There's no way to open the character's mouth
+* Upper body bone constraints have not been fully set up yet
 * No support of male characters 
+* It will have a shot at automatic texturing of clothing and hair, but the result is going to be very crude
 * All of the issues of the manual route
+* Possibly many other bugs I haven't discovered yet
 
 
