@@ -9,15 +9,23 @@ def ShowMessageBox(message = "", title = "Message Box", icon = 'INFO'):
         self.layout.label(text=message)
     bpy.context.window_manager.popup_menu(draw, title = title, icon = icon)
 
+eye_color=None
+hair_color=None
 
-path="C:\\temp\\HS2\\Export\\20211005004423_BR-Chan\\"
-fbx=path+"BR-Chan.fbx"
+name="..."
+ts = '20211005195515'
+eye_color=(0.110, 0.196, 0.174)
+hair_color=(0.115, 0.071, 0.053)
+
+path="C:\\temp\\HS2\\Export\\" + ts + "_" + name + "\\"
+fbx=path+name+".fbx"
 
 suffix='abcd'
 
 path += "Textures\\"
 
-dump='C:\\Temp\\HS2\\UserData\\MaterialEditor\\br_chan_dump.txt'
+dump = 'C:\\Temp\\HS2\\UserData\\MaterialEditor\\' + name + '.txt'
+
 dump=open(dump,'r').readlines()
 dump=[x.strip() for x in dump]
 if 'cf_J_Root' in dump[0]:
@@ -25,24 +33,17 @@ if 'cf_J_Root' in dump[0]:
 else:
     print('ERROR: Could not parse the dump file')
 
+if hair_color!=None:
+    if len(hair_color)==3:
+        hair_color=(hair_color[0], hair_color[1], hair_color[2], 1.0)
+
+if eye_color!=None:
+    if len(eye_color)==3:
+        eye_color=(eye_color[0], eye_color[1], eye_color[2], 1.0)
 
 
-
-"""
-
-TODO: changes needed to import male characters correctly:
-   
-* No body texture2 (where's the nipple?)
-* Set head gloss map scale to 5, subtract constant to 0.850 instead of 0.650
-* No head bumpmap2 or body bumpmap2
-* Head bumpmap is same style as for girls (x in alpha, y in G), but body bumpmap is different (x in R, y in G)
-
-"""
-
-boy=False
-bn='o_body_cm' if boy else 'o_body_cf'
-
-bodyparts=[bn,
+bodyparts=[
+#bn,
 'o_eyebase_L',
 'o_eyebase_R',
 'o_eyelashes',
@@ -87,18 +88,15 @@ def set_tex(obj, node, x, y, alpha=None, csp=None):
 
 sc = bpy.data.scenes[0]
 
-
-
-
-
 def bbox(x):
-    rv=[[x[0].co[0],x[0].co[1],x[0].co[2]],
-        [x[0].co[0],x[0].co[1],x[0].co[2]]]
-    for y in x:
-        for n in range(3):
-            rv[0][n]=min(rv[0][n], y.co[n])
-            rv[1][n]=max(rv[1][n], y.co[n])
-    return rv
+     rv=[[x[0].co[0],x[0].co[1],x[0].co[2]],
+         [x[0].co[0],x[0].co[1],x[0].co[2]]]
+     for y in x:
+         for n in range(3):
+             rv[0][n]=min(rv[0][n], y.co[n])
+             rv[1][n]=max(rv[1][n], y.co[n])
+     return rv
+
 
 # The head always (or at least typically) has three parts: skull, forehead, mouth cavity.
 # Their order is not guaranteed. We make a duplicate of the forehead to apply eyebrow textures,
@@ -139,12 +137,12 @@ def rebuild_head():
             mouth='o_head'
             forehead='o_head.002'
             head='o_head.001'
-    bpy.data.objects[forehead].select_set(True)
     bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.ops.object.select_all(action='DESELECT')
+    bpy.data.objects[forehead].select_set(True)
     bpy.ops.object.duplicate()
     bpy.data.objects[head].select_set(True)
     bpy.context.view_layer.objects.active = bpy.data.objects[head]
-    bpy.ops.object.mode_set(mode='OBJECT')
     bpy.ops.object.join()
     bpy.data.objects[mouth].name='o_mouth'
     bpy.data.objects[forehead].name='o_forehead'
@@ -233,6 +231,11 @@ def rebuild_torso():
         chara['l_booby']=bpy.data.meshes[boobies[1]]
     #bpy.ops.object.mode_set(mode='EDIT')
     print(other, bn)
+    if boy:
+        if 'cm_o_dan00' in bpy.data.objects:
+            other.append('cm_o_dan00')
+        if 'cm_o_dan_f' in bpy.data.objects:
+            other.append('cm_o_dan_f')            
     join_meshes(other, bn)
 
 def load_textures():
@@ -247,7 +250,9 @@ def load_textures():
         chara['o_eyelashes'].materials.pop()
     chara['o_eyelashes'].materials.append(eyelash_mat)
     set_tex('o_eyelashes', 'Image Texture', 'eyelashes', 'MainTex', csp='Non-Color')    
-    
+    if hair_color!=None:
+        eyelash_mat.node_tree.nodes['RGB'].outputs[0].default_value = hair_color
+
     eye_mat = bpy.data.materials['Eyes'].copy()
     eye_mat.name = 'Eyes_' + suffix
     while len(chara['o_eyebase_R'].materials):
@@ -259,7 +264,9 @@ def load_textures():
     set_tex('o_eyebase_L', 'Image Texture', 'eye', 'MainTex', csp='Non-Color')    
     set_tex('o_eyebase_L', 'Image Texture.001', 'eye', 'Texture2', csp='Non-Color')    
     set_tex('o_eyebase_L', 'Image Texture.002', 'eye', 'Texture3', csp='Non-Color')    
-    set_tex('o_eyebase_L', 'Image Texture.003', 'eye', 'Texture4')    
+    set_tex('o_eyebase_L', 'Image Texture.003', 'eye', 'Texture4', csp='Non-Color')    
+    if eye_color!=None:
+        eye_mat.node_tree.nodes['RGB'].outputs[0].default_value = eye_color
 
     head_mat = bpy.data.materials['Head'].copy()
     head_mat.name = 'Head_' + suffix
@@ -269,10 +276,16 @@ def load_textures():
     set_tex('o_head', 'Image Texture', 'head', 'MainTex', alpha='NONE', csp='Non-Color')
     set_tex('o_head', 'Image Texture.002', 'head', 'DetailMainTex', csp='Non-Color')
     set_tex('o_head', 'Image Texture.003', 'head', 'DetailGlossMap', csp='Non-Color')
-    set_tex('o_head', 'Image Texture.006', 'head', 'BumpMap2_converted', csp='Non-Color')
     set_tex('o_head', 'Image Texture.007', 'head', 'BumpMap_converted', csp='Non-Color')
+    if boy:
+        # No bump map 2
+        head_mat.node_tree.nodes['Value.001'].outputs[0].default_value=0.0
+        head_mat.node_tree.nodes['Value.003'].outputs[0].default_value=3.5 # Scale for textured gloss
+        head_mat.node_tree.nodes['Math.002'].inputs[1].default_value = 0.850 # Subtract constant for textured gloss
+        head_mat.node_tree.nodes['Vector Math.003'].inputs[3].default_value = 5.0 # UV coordinate scale for textured gloss
+    else:
+        set_tex('o_head', 'Image Texture.006', 'head', 'BumpMap2_converted', csp='Non-Color')
     #head_mat.node_tree.nodes['Value'].outputs[0].default_value=0.0
-    #head_mat.node_tree.nodes['Value.001'].outputs[0].default_value=0.0
 
     
     forehead_mat = bpy.data.materials['Eyebrows'].copy()
@@ -280,7 +293,9 @@ def load_textures():
     while len(chara['o_forehead'].materials):
         chara['o_forehead'].materials.pop()
     chara['o_forehead'].materials.append(forehead_mat)
-    set_tex('o_forehead', 'Image Texture', 'head', 'Texture3')
+    set_tex('o_forehead', 'Image Texture', 'head', 'Texture3', csp='Non-Color')
+    if hair_color!=None:
+        forehead_mat.node_tree.nodes['RGB'].outputs[0].default_value = hair_color
 
     body_mat = bpy.data.materials['Torso'].copy()
     body_mat.name = 'Torso_' + suffix
@@ -309,14 +324,23 @@ def load_textures():
     set_tex('l_booby', 'Image Texture', 'body', 'Texture2', csp='Non-Color')    
     bpy.data.objects['l_booby']['BoobyIndex']=1.0
 
-    hair_mat = bpy.data.materials['test_hair'].copy()
-    hair_mat.name = 'Hair_' + suffix
+    #hair_mat = bpy.data.materials['test_hair'].copy()
+    #hair_mat.name = 'Hair_' + suffix
     for x in bpy.data.objects.keys():
         if 'hair' in x:
-            o = bpy.data.meshes[x]
-            while len(o.materials):
-                o.materials.pop()
-            o.materials.append(hair_mat)
+            mesh = bpy.data.objects[x].data
+            m = mesh.materials[0]
+            n = m.name
+            if '.' in n:
+                n = n.split('.')[0]            
+            while len(mesh.materials):
+                mesh.materials.pop()
+            mat = bpy.data.materials['test_hair'].copy()
+            mesh.materials.append(mat)
+            set_tex(mesh.name, 'Image Texture', n, 'MainTex', csp='Non-Color')
+            set_tex(mesh.name, 'Image Texture.001', n, 'BumpMap_converted', csp='Non-Color')
+            if hair_color!=None:
+                mat.node_tree.nodes['Principled BSDF'].inputs['Base Color'].default_value = hair_color
             
     for x in bpy.data.objects.keys():
         if x.startswith('o_') and not x in chara:
@@ -415,16 +439,26 @@ def stitch_head_to_torso():
     bpy.ops.mesh.select_all(action='DESELECT')
     bpy.ops.mesh.select_non_manifold()
     bpy.ops.mesh.remove_doubles(threshold=max(error*1.5, 0.001), use_unselected=True)
-    bpy.ops.mesh.select_more()
+    #bpy.ops.mesh.select_more()
+    bpy.ops.mesh.select_all(action='SELECT')
     bpy.ops.mesh.normals_tools(mode='RESET')
+    bpy.ops.mesh.select_all(action='DESELECT')
     #selected_verts = [v for v in bpy.data.meshes[bn].vertices if v.select]    
 
 def import_bodyparts():
+    global chara
+    global bn
+    global boy
     for bpy_data_iter in (bpy.data.objects, bpy.data.meshes):
         for id_data in bpy_data_iter:
-            if  id_data.name!="Cube" and id_data.name!="Material Cube":
+            if  id_data.name!="Cube" and id_data.name!="Material Cube" and not id_data.name.startswith('Prefab '):
                 bpy_data_iter.remove(id_data)
     bpy.ops.import_scene.fbx(filepath=fbx)
+    boy = ('o_body_cm' in bpy.data.objects)
+    bn='o_body_cm' if boy else 'o_body_cf'
+    bodyparts.append(bn)
+    chara[bn]=None
+
     for x in bodyparts:
         for y in bpy.data.meshes.keys(): #sc.objects.keys():
             if y.startswith(x):
@@ -439,9 +473,8 @@ def import_bodyparts():
             or (bpy_data_iter==bpy.data.objects and id_data.type=='EMPTY'):                
                 bpy_data_iter.remove(id_data)
     bpy.data.objects.remove(bpy.data.objects['o_namida'])
-    if 'o_body_cf' in bpy.data.objects:
-        bpy.data.objects.remove(bpy.data.objects['o_body_cf']) # it's an Empty 
-    bpy.data.objects['o_body_cf.001'].name='o_body_cf'
+    if (not boy) and bn+'.001' in bpy.data.objects:
+        bpy.data.objects[bn+'.001'].name=bn
     #TODO: delete all the Empty objects and hierarchies    
     if not 'o_head' in bpy.data.meshes:
         heads=[x for x in bpy.data.meshes.keys() if x.startswith('o_head')]
@@ -479,7 +512,7 @@ def load_unity_dump():
             bone_parent[name]=x.split()[2]
         elif (x.startswith('@localToWorldMatrix<Matrix4x4>') \
             or x.startswith('@worldToLocalMatrix<Matrix4x4>')):
-            if not name.startswith('cf_'):
+            if not name.startswith('cf_') and not name.startswith('cm_'):
                 continue
             m=[
                 x.split()[-4:],
@@ -532,13 +565,18 @@ def reshape_armature():
     1: right leg FK
     2: left arm FK
     3: right arm FK
-    4: left arm FK
-    5: right arm FK
+    4: left hand FK
+    5: right hand FK
     6: torso
     7: toes
     12: face
     13: breasts
     14: groin  
+    16: left leg soft
+    17: right leg soft
+    18: left arm soft
+    19: right arm soft
+    22: torso soft
     28: face soft
 
     """
@@ -595,8 +633,7 @@ def reshape_armature():
                 array[14]=True
             if x.name in ['cf_J_Mouthup', 'cf_J_MouthLow', 'cf_J_MouthMove']:
                 array[12]=True
-            if x.name[:-1] in ['cf_J_Mouth_', 'cf_J_CheekUp_', 'cf_J_Eye01_', 'cf_J_Eye02_', 'cf_J_Eye03_', 'cf_J_Eye04_', 
-                'cf_J_eye_rs_', 'cf_J_Mayu_', 'cf_J_look_', 'cf_J_EyePos_rz_', 'cf_J_Eye_r_']:
+            if x.name[:-1] in ['cf_J_Mouth_', 'cf_J_CheekUp_', 'cf_J_Mayu_', 'cf_J_look_']:
                 array[12]=True
             if x.name in ['cf_J_ChinLow', 'cf_J_Chin_rs', 'cf_J_ChinTip_s', 'cf_J_NoseTip', 'cf_J_NoseBase_s', 'cf_J_MouthBase_tr', 
                 'cf_J_MouthCavity', 'cf_J_FaceLow_s', 'cf_J_MouthBase_s', 'cf_J_FaceLowBase', 'cf_J_FaceRoot', 'cf_J_FaceRoot_s', 'cf_J_FaceBase',
@@ -607,9 +644,11 @@ def reshape_armature():
             if x.name[:-1] in ['cf_J_CheekLow_', 'cf_J_NoseWing_tx_', 'cf_J_Eye01_s_', 'cf_J_Eye02_s_', 'cf_J_Eye03_s_', 'cf_J_Eye04_s_',
                 'cf_J_pupil_s_', 'cf_J_Eye_t_', 'cf_J_MayuTip_s_', 'cf_J_MayuMid_s_', 'cf_J_Eye_s_', 
                 'cf_J_EarUp_', 'cf_J_EarBase_s_', 'cf_J_EarLow_', 
+                'cf_J_Eye01_', 'cf_J_Eye02_', 'cf_J_Eye03_', 'cf_J_Eye04_', 
+                'cf_J_eye_rs_', 'cf_J_EyePos_rz_', 'cf_J_Eye_r_'
                 ]:
                 array[28]=True
-            array[15] = any(array[:15]) or any(array[16:])
+            array[15] = not(any(array[:15]) or any(array[16:]))
             array[31] = True
             x.layers=array
                 
@@ -624,6 +663,15 @@ def reshape_armature():
                 fix_dir=(-1,0,0)
             elif array[7]:
                 fix_dir=(0,0,1)
+            elif 'Vagina' in x.name:
+                if x.name=='cf_J_Vagina_B':
+                    fix_dir=(0,0,-0.05)
+                elif x.name=='cf_J_Vagina_F':
+                    fix_dir=(0,0,0.05)                
+                elif '_L' in x.name:
+                    fix_dir=(-0.05,0,0)                
+                elif '_R' in x.name:
+                    fix_dir=(0.05,0,0)                
             if fix_dir!=None:
                 bone_length = bone_length.length * Vector(fix_dir)
             x.tail=x.head+bone_length      
@@ -634,139 +682,100 @@ def reshape_armature():
     
     for n in ['cf_J_LegUp00_L', 'cf_J_LegLow01_L', 
             'cf_J_LegUp00_R', 'cf_J_LegLow01_R', 
-            'cf_J_LegLowRoll_L', 'cf_J_LegLowRoll_R']:
+            'cf_J_LegLowRoll_L', 'cf_J_LegLowRoll_R',
+            'cf_J_look_L', 'cf_J_look_R'
+            ]:
         bone = arm.pose.bones[n]
         bone.rotation_mode='YZX'
 
-    for n in ['cf_J_LegLow01_L', 'cf_J_LegLow01_R', 'cf_J_LegLowRoll_L', 'cf_J_LegLowRoll_R',
-        'cf_J_ArmUp00_L', 'cf_J_ArmUp00_R', 'cf_J_ArmLow01_L', 'cf_J_ArmLow01_R', 'cf_J_Hand_L', 'cf_J_Hand_R'
-        ]:
-        bone = arm.pose.bones[n]
-        bone.rotation_mode='XYZ'
-        bpy.types.ArmatureBones.active = bone
-        con = bone.constraints.new('LIMIT_ROTATION')
-        if 'Hand' in n:
-            con.min_x=-45.*3.14159/180.
-            con.max_x=45.*3.14159/180.
-            con.min_y=0
-            con.max_y=0
-            con.min_z=-100.*3.14159/180.
-            con.max_z=100.*3.14159/180.
-        elif 'ArmUp' in n:
+    #these all need to be reviewed after applying copy constraints
+    # (it's not always clear where each particular motion should be; 
+    # e.g., elbow can be twisted by rotating either ArmUp00 or ArmLow01)
+    limit_rotation_constraints=[
+    # leave some freedom to twist (ideally, we'd just turn the hip, but the rig has its limits)
+    ('cf_J_LegLow01', -170, 0, -45, 45, 0, 0), 
+    ('cf_J_LegLowRoll', 0, 0, -60, 60, 0, 0),
+    # x is forward-back
+    # y turns the elbow
+    # z is up-down
+    ('cf_J_ArmUp00', -100, 100, -90, 90, -100, 100),
+    ('cf_J_ArmLow01', 0, 170, -90, 90, -90, 90),
+    ('cf_J_Hand', -45, 45, -90, 90, -100, 100),
+    ('cf_J_look', -30, 30, -30, 30, 0, 0),
+    ]
+    for c in limit_rotation_constraints:
+        for s in ('L', 'R'):
+            bone = arm.pose.bones[c[0]+'_'+s]
             bone.rotation_mode='XYZ'
-            # x is forward-back (should we allow this motion here or in the shoulder?)
-            con.min_x=-100.*3.14159/180.
-            con.max_x=100.*3.14159/180.
-            # twisting this bone turns the elbow
-            con.min_y=-90.*3.14159/180.
-            con.max_y=90.*3.14159/180.
-            # z is up-down
-            con.min_z=-100.*3.14159/180.
-            con.max_z=100.*3.14159/180.
-        elif 'ArmLow' in n:
-            con.min_x=0
-            con.max_x=170.*3.14159/180.
-            # twisting this bone turns the lower arm and the wrist; can't turn the wrist on its own
-            con.min_y=-90.*3.14159/180.
-            con.max_y=90.*3.14159/180.
-            # can't bend the elbow sideways
-            con.min_z=0
-            con.max_z=0
-        elif 'Roll' in n: 
-            con.min_x=0
-            con.max_x=0
-            con.min_y=-60.*3.14159/180.
-            con.max_y=60*3.14159/180.
-            con.min_z=0
-            con.max_z=0
-        else:
-            con.min_x=-170.*3.14159/180.
-            con.max_x=0
-            # in case we really need to (ideally, we'd just turn the hip, but the rig has its limits)
-            con.min_y=-45*3.14159/180.
-            con.max_y=45.*3.14159/180.
-            con.min_z=0
-            con.max_z=0
-        con.use_limit_x=True
-        con.use_limit_y=True
-        con.use_limit_z=True
-        con.owner_space='LOCAL'
-        
-    # TODO: there may be more similar constraints for elbows/shoulders/wrists
-    for n in ['cf_J_LegKnee_dam_L', 'cf_J_LegKnee_dam_R', 
-            'cf_J_LegKnee_back_L', 'cf_J_LegKnee_back_R',
-            'cf_J_SiriDam_L', 'cf_J_SiriDam_R',
-            'cf_J_LegUpDam_L', 'cf_J_LegUpDam_R',
-            'cf_J_ArmElbo_dam_01_L', 'cf_J_ArmElbo_dam_01_R',
-            ]:
-        bone = arm.pose.bones[n]
-        bone.rotation_mode='XYZ'
-        bpy.types.ArmatureBones.active = bone
-        con = bone.constraints.new('COPY_ROTATION')
-        con.mix_mode='ADD'
-        con.target=arm
-        con.owner_space='LOCAL'
-        con.target_space='LOCAL'
-        con.euler_order='YZX'
-        if ('Siri' in n):
-            con.subtarget='cf_J_LegUp00_' + n[-1]
-            # the order of these two possibly matters, as does the Euler order
-            con.use_x=True
-            con.use_y=False
-            con.use_z=False
-            con.influence=0.5
-                
+            bpy.types.ArmatureBones.active = bone
+            con = bone.constraints.new('LIMIT_ROTATION')
+            con.min_x=c[1]*3.14159/180.
+            con.max_x=c[2]*3.14159/180.
+            con.min_y=c[3]*3.14159/180.
+            con.max_y=c[4]*3.14159/180.
+            con.min_z=c[5]*3.14159/180.
+            con.max_z=c[6]*3.14159/180.
+            con.use_limit_x=True
+            con.use_limit_y=True
+            con.use_limit_z=True
+            con.owner_space='LOCAL'
+
+    # TODO: these may not be 100% exact; there may be others
+    constraints=[
+        ('cf_J_LegUp00_', 'cf_J_SiriDam_', 'x', 0.5),
+        ('cf_J_LegUp00_', 'cf_J_SiriDam_', 'yz', 0.2),
+        ('cf_J_LegUp00_', 'cf_J_LegUpDam_', 'xz', 0.74),
+        ('cf_J_LegLow01_', 'cf_J_LegKnee_dam_', 'x', 0.5),
+        ('cf_J_LegLow01_', 'cf_J_LegKnee_back_', 'x', 1.0),
+        ('cf_J_ArmUp00_', 'cf_J_ArmUp01_dam_', 'x', -0.66),  
+        ('cf_J_ArmUp00_', 'cf_J_ArmUp02_dam_', 'x', -0.33),
+        ('cf_J_ArmLow01_', 'cf_J_ArmElboura_dam_', 'yz', 0.578),
+        ('cf_J_ArmLow01_', 'cf_J_ArmElbo_dam_01_', 'x', 0.6),
+        ('cf_J_Hand_', 'cf_J_ArmLow02_dam_', 'x', 0.5),
+        ('cf_J_Hand_', 'cf_J_Hand_Wrist_dam_', 'x', 1.0),
+        ('cf_J_Hand_','cf_J_Hand_dam_', 'y', 0.65),
+    ]
+    for c in constraints:
+        for s in ('L','R'):
+            bone = arm.pose.bones[c[1]+s]
+            bone.rotation_mode='XYZ'
+            bpy.types.ArmatureBones.active = bone
             con = bone.constraints.new('COPY_ROTATION')
             con.mix_mode='ADD'
             con.target=arm
-            con.subtarget='cf_J_LegUp00_' + n[-1]
-            con.use_x=False
-            con.use_y=True
-            con.use_z=True
-            con.influence=0.2
             con.owner_space='LOCAL'
             con.target_space='LOCAL'
-        elif ('LegUp' in n):
-            con.subtarget='cf_J_LegUp00_' + n[-1]
-            con.use_x=True
-            con.use_y=False
-            con.use_z=True
-            con.influence=0.74
-        elif 'ArmElbo' in n:
-            con.subtarget='cf_J_ArmLow01_' + n[-1]
-            con.use_x=True
-            con.use_y=False
-            con.use_z=False
-            # rough guess
-            con.influence=0.5
-        else:
-            con.subtarget='cf_J_LegLow01_' + n[-1]
-            con.use_x=True
-            con.use_y=False
-            con.use_z=False
-            con.influence=1.0 if ('_back_' in n) else 0.5
+            con.euler_order='YZX' #not sure if this is universal
+            con.subtarget=c[0]+s
+            con.use_x=('x' in c[2])
+            con.use_y=('y' in c[2])
+            con.use_z=('z' in c[2])
+            con.influence=c[3]
         
     arm.data.display_type = 'STICK'
     arm.data.layers=[True,True,True,True] + [False]*28
     arm.show_in_front = True
     
 
-import_bodyparts()
-rebuild_head()
-rebuild_torso()
-load_textures()
+if import_bodyparts():
+    rebuild_head()
+    rebuild_torso()
+    load_textures()
 
-fixup_head()
-fixup_torso()
-stitch_head_to_torso()
-load_unity_dump()
-reshape_armature()            
+    fixup_head()
+    fixup_torso()
+    stitch_head_to_torso()
+    load_unity_dump()
+    reshape_armature()            
 
-# TODO: better texturing for all cloth and hair objects
+    # TODO: better texturing for all cloth and hair objects
+    # For some clothing objects, need to load 'occlusion map' and plug B into alpha to simulate wear
+    # (for others, maintex alpha seems to do the job)
 
-bpy.ops.object.mode_set(mode='OBJECT')
-light_data = bpy.data.lights.new('light', type='POINT')
-light = bpy.data.objects.new('light', light_data)
-bpy.context.collection.objects.link(light)
-light.location = (5, -5, 10)
-light.data.energy=2000.0
+    bpy.ops.object.mode_set(mode='OBJECT')
+    light_data = bpy.data.lights.new('light', type='POINT')
+    light = bpy.data.objects.new('light', light_data)
+    bpy.context.collection.objects.link(light)
+    light.location = (5, -5, 10)
+    light.data.energy=2000.0
+    
