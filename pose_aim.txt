@@ -1,0 +1,265 @@
+cf_N_height scale 0.9000 0.9000 0.9000
+cf_J_Hips offset -0.1164 -0.2522 0.0067
+cf_J_Hips rotation 0.9269 0.0000 -0.3754 0.0000
+cf_J_Kosi01 rotation 0.9986 0.0000 -0.0531 0.0000
+cf_J_Kosi01_s scale 0.9329 1.0000 1.0500
+cf_J_Kosi02 rotation 1.0000 0.0010 -0.0064 0.0000
+cf_J_Kosi02_s scale 1.0799 1.0000 1.0500
+cf_J_Ana rotation 1.0000 0.0095 0.0000 0.0000
+cf_J_LegUp00_L rotation 0.9788 -0.1644 0.0493 0.1118
+cf_J_LegKnee_dam_L rotation 1.0000 0.0153 0.0000 0.0000
+cf_J_LegKnee_low_s_L offset 0.0000 0.0000 0.0058
+cf_J_LegKnee_low_s_L scale 1.0652 1.0000 1.0614
+cf_J_LegLow01_L rotation 0.9560 0.2916 -0.0255 0.0193
+cf_J_LegLow01_s_L rotation 1.0000 -0.0007 0.0000 0.0000
+cf_J_LegLow01_s_L scale 1.0972 1.0000 1.0972
+cf_J_LegLow03_s_L offset -0.0063 0.0000 0.0078
+cf_J_LegLow03_s_L rotation 1.0000 0.0055 0.0000 0.0055
+cf_J_LegLow03_s_L scale 1.0884 1.0000 1.0884
+cf_J_Foot01_L rotation 0.9876 -0.0906 0.0083 -0.1283
+cf_J_Foot02_L rotation 0.9971 -0.0765 0.0000 0.0000
+cf_J_Toes01_L rotation 1.0000 -0.0167 0.0087 0.0000
+cf_J_LegLow02_s_L scale 1.1255 1.0000 1.1255
+cf_J_LegUp01_L rotation 1.0000 0.0000 0.0004 0.0000
+cf_J_LegUp01_s_L offset 0.0055 0.0000 -0.0207
+cf_J_LegUp01_s_L rotation 1.0000 0.0000 0.0000 -0.0006
+cf_J_LegUp01_s_L scale 1.1201 1.0000 1.1068
+cf_J_LegUp02_L rotation 1.0000 0.0000 0.0016 0.0000
+cf_J_LegUp02_s_L scale 1.1450 1.0000 1.1253
+cf_J_LegUp03_s_L scale 1.0669 1.0000 1.0672
+cf_J_LegKnee_back_L rotation 0.9995 0.0305 0.0000 0.0000
+cf_J_LegKnee_back_s_L scale 0.9982 1.0000 0.9982
+cf_J_LegUp00_R rotation 0.9856 -0.1268 -0.0378 -0.1054
+cf_J_LegKnee_dam_R rotation 1.0000 0.0153 0.0000 0.0000
+cf_J_LegKnee_low_s_R offset 0.0000 0.0000 0.0058
+cf_J_LegKnee_low_s_R scale 1.0652 1.0000 1.0652
+cf_J_LegLow01_R rotation 0.9549 0.2927 -0.0102 -0.0478
+cf_J_LegLow01_s_R rotation 1.0000 -0.0007 0.0000 0.0000
+cf_J_LegLow01_s_R scale 1.0972 1.0000 1.0972
+cf_J_LegLow03_s_R offset 0.0063 0.0000 0.0078
+cf_J_LegLow03_s_R rotation 1.0000 0.0055 0.0000 -0.0055
+cf_J_LegLow03_s_R scale 1.0884 1.0000 1.0884
+cf_J_Foot01_R rotation 0.9873 -0.1316 -0.0055 0.0887
+cf_J_Foot02_R rotation 0.9992 -0.0404 0.0000 0.0000
+cf_J_Toes01_R rotation 1.0000 -0.0236 0.0000 0.0000
+cf_J_LegLow02_s_R scale 1.1255 1.0000 1.1255
+cf_J_LegUp01_R rotation 1.0000 0.0000 0.0017 0.0000
+cf_J_LegUp01_s_R offset -0.0055 0.0000 -0.0207
+cf_J_LegUp01_s_R rotation 1.0000 0.0000 0.0000 0.0006
+cf_J_LegUp01_s_R scale 1.1201 1.0000 1.1068
+cf_J_LegUp02_R rotation 1.0000 0.0000 0.0030 0.0000
+cf_J_LegUp02_s_R scale 1.1450 1.0000 1.1253
+cf_J_LegUp03_s_R scale 1.0669 1.0000 1.0672
+cf_J_LegKnee_back_R rotation 0.9995 0.0305 0.0000 0.0000
+cf_J_LegKnee_back_s_R scale 0.9982 1.0000 0.9982
+cf_J_SiriDam_L rotation 1.0000 -0.0049 0.0000 0.0000
+cf_J_Siri_s_L offset 0.0000 0.0000 -0.0259
+cf_J_Siri_s_L scale 1.0259 1.0000 1.0259
+cf_J_Siriopen_s_L offset 0.0000 0.0039 0.0000
+cf_J_Siriopen_s_L rotation 1.0000 0.0049 0.0000 0.0000
+cf_J_SiriDam_R rotation 1.0000 -0.0049 0.0000 0.0000
+cf_J_Siri_s_R offset 0.0000 0.0000 -0.0259
+cf_J_Siri_s_R scale 1.0259 1.0000 1.0259
+cf_J_Siriopen_s_R offset 0.0000 0.0039 0.0000
+cf_J_Siriopen_s_R rotation 1.0000 0.0049 0.0000 0.0000
+cf_J_LegUpDam_s_L scale 1.0541 1.0000 1.0541
+cf_J_LegUpDam_s_R scale 1.0541 1.0000 1.0541
+cf_J_Spine01 rotation 0.9992 -0.0135 -0.0277 -0.0255
+cf_J_Spine01_s offset 0.0000 -0.0209 0.0313
+cf_J_Spine01_s scale 0.9760 1.0000 0.8697
+cf_J_Spine02 rotation 0.9885 0.1457 -0.0381 0.0159
+cf_J_Spine02_s scale 1.1415 1.0000 0.9642
+cf_J_Spine03 rotation 0.9996 0.0183 -0.0041 0.0229
+cf_J_Mune00 rotation 1.0000 -0.0092 0.0016 -0.0080
+cf_J_Mune00_t_L offset 0.0344 -0.0026 -0.0224
+cf_J_Mune00_t_L rotation 1.0000 0.0089 -0.0018 0.0000
+cf_J_Mune00_t_L scale 1.0500 1.0500 1.0500
+cf_J_Mune00_L offset -0.0005 -0.0160 -0.0027
+cf_J_Mune00_s_L offset 0.0000 0.0000 -0.0089
+cf_J_Mune00_s_L scale 1.0157 1.0157 1.0157
+cf_J_Mune00_d_L offset 0.0000 0.0000 0.0004
+cf_J_Mune00_d_L rotation 1.0000 0.0039 0.0000 0.0000
+cf_J_Mune01_L offset 0.0000 -0.0159 0.0000
+cf_J_Mune01_L rotation 1.0000 0.0095 0.0000 0.0000
+cf_J_Mune01_s_L offset 0.0000 -0.0188 -0.0040
+cf_J_Mune01_s_L rotation 1.0000 0.0124 0.0012 0.0000
+cf_J_Mune01_s_L scale 1.0418 1.0418 1.0418
+cf_J_Mune01_t_L offset 0.0011 0.0000 -0.0339
+cf_J_Mune01_t_L rotation 1.0000 0.0116 0.0000 0.0000
+cf_J_Mune02_L offset 0.0000 -0.0104 -0.0007
+cf_J_Mune02_L rotation 1.0000 0.0041 0.0000 0.0000
+cf_J_Mune02_s_L offset 0.0000 0.0052 0.0148
+cf_J_Mune02_s_L rotation 1.0000 -0.0218 0.0000 0.0000
+cf_J_Mune02_s_L scale 1.0441 1.0441 1.0441
+cf_J_Mune02_t_L offset 0.0000 0.0000 -0.0339
+cf_J_Mune02_t_L rotation 1.0000 0.0116 0.0000 0.0000
+cf_J_Mune03_L offset 0.0000 -0.0070 -0.0018
+cf_J_Mune03_s_L offset 0.0000 0.0000 -0.0010
+cf_J_Mune03_s_L scale 0.9844 0.9844 0.9751
+cf_J_Mune_Nip01_s_L offset 0.0000 0.0000 0.0043
+cf_J_Mune_Nip01_s_L scale 1.1758 1.1758 0.9728
+cf_J_Mune_Nip02_s_L offset 0.0000 0.0000 0.0271
+cf_J_Mune_Nip02_s_L scale 1.2035 1.2035 1.2035
+cf_J_Mune00_t_R offset -0.0344 -0.0026 -0.0224
+cf_J_Mune00_t_R rotation 1.0000 0.0089 0.0018 0.0000
+cf_J_Mune00_t_R scale 1.0500 1.0500 1.0500
+cf_J_Mune00_R offset 0.0005 -0.0160 -0.0027
+cf_J_Mune00_s_R offset 0.0000 0.0000 -0.0089
+cf_J_Mune00_s_R scale 1.0157 1.0157 1.0157
+cf_J_Mune00_d_R offset 0.0000 0.0000 0.0005
+cf_J_Mune00_d_R rotation 1.0000 0.0039 0.0000 0.0000
+cf_J_Mune01_R offset 0.0000 -0.0159 0.0000
+cf_J_Mune01_R rotation 1.0000 0.0095 0.0000 0.0000
+cf_J_Mune01_s_R offset 0.0000 -0.0188 -0.0040
+cf_J_Mune01_s_R rotation 1.0000 0.0124 -0.0012 0.0000
+cf_J_Mune01_s_R scale 1.0418 1.0418 1.0418
+cf_J_Mune01_t_R offset -0.0011 0.0000 -0.0339
+cf_J_Mune01_t_R rotation 1.0000 0.0116 0.0000 0.0000
+cf_J_Mune02_R offset 0.0000 -0.0104 -0.0007
+cf_J_Mune02_R rotation 1.0000 0.0042 0.0000 0.0000
+cf_J_Mune02_s_R offset 0.0000 0.0052 0.0148
+cf_J_Mune02_s_R rotation 1.0000 -0.0218 0.0000 0.0000
+cf_J_Mune02_s_R scale 1.0441 1.0441 1.0441
+cf_J_Mune02_t_R offset 0.0000 0.0000 -0.0339
+cf_J_Mune02_t_R rotation 1.0000 0.0116 0.0000 0.0000
+cf_J_Mune03_R offset 0.0000 -0.0070 -0.0018
+cf_J_Mune03_s_R scale 0.9751 0.9751 0.9751
+cf_J_Mune_Nip01_s_R offset 0.0000 0.0000 0.0043
+cf_J_Mune_Nip01_s_R scale 1.1758 1.1758 0.9728
+cf_J_Mune_Nip02_s_R offset 0.0000 0.0000 0.0271
+cf_J_Mune_Nip02_s_R scale 1.2035 1.2035 1.2035
+cf_J_Neck rotation 0.9743 0.1156 0.1934 -0.0076
+cf_J_Head rotation 0.9819 -0.0201 0.1614 0.0969
+cf_J_Head_s scale 1.0800 1.0800 1.0800
+cf_J_FaceBase scale 0.9934 1.0000 1.0000
+cf_J_FaceLowBase offset 0.0000 0.0000 -0.0125
+cf_J_FaceLow_s scale 1.0176 1.0000 1.0000
+cf_J_CheekLow_L offset 0.0041 -0.0717 -0.0605
+cf_J_CheekLow_R offset -0.0041 -0.0718 -0.0605
+cf_J_CheekUp_L offset -0.0387 -0.0004 0.0359
+cf_J_CheekUp_R offset 0.0387 -0.0004 0.0359
+cf_J_Chin_rs offset 0.0000 0.0285 -0.0006
+cf_J_Chin_rs rotation 0.9995 0.0303 0.0000 0.0000
+cf_J_Chin_rs scale 0.9644 1.0000 1.0000
+cf_J_ChinTip_s offset 0.0000 0.0274 -0.0034
+cf_J_ChinTip_s scale 1.0340 1.0340 1.0340
+cf_J_ChinLow offset 0.0000 0.0516 0.0000
+cf_J_MouthBase_tr offset 0.0000 0.0142 0.0047
+cf_J_MouthBase_s scale 1.0166 0.9495 1.0000
+cf_J_Mouth_L offset 0.0000 -0.0170 0.0000
+cf_J_Mouth_R offset 0.0000 -0.0170 0.0000
+cf_J_MouthLow offset 0.0000 0.0034 -0.0016
+cf_J_MouthLow scale 0.9897 1.0000 1.0000
+cf_J_Mouthup offset 0.0000 -0.0072 0.0000
+cf_J_FaceUp_ty offset 0.0000 0.0147 0.0000
+cf_J_EarLow_L offset 0.0000 -0.0141 0.0000
+cf_J_EarLow_L scale 1.0385 1.0385 1.0385
+cf_J_EarUp_L offset 0.0156 0.0076 -0.0080
+cf_J_EarUp_L rotation 1.0000 0.0020 0.0020 0.0000
+cf_J_EarUp_L scale 0.9916 0.9916 0.9916
+cf_J_EarLow_R offset 0.0000 -0.0141 0.0000
+cf_J_EarLow_R scale 1.0385 1.0385 1.0385
+cf_J_EarUp_R offset -0.0156 0.0017 -0.0015
+cf_J_EarUp_R rotation 1.0000 0.0020 -0.0020 0.0000
+cf_J_EarUp_R scale 0.9916 0.9916 0.9916
+cf_J_FaceUp_tz offset 0.0000 0.0000 0.0097
+cf_J_Eye_t_L offset -0.0452 -0.0117 -0.0133
+cf_J_Eye_t_L rotation 1.0000 0.0000 0.0000 -0.0089
+cf_J_Eye_s_L scale 0.8462 0.8460 1.0000
+cf_J_Eye01_L rotation 1.0000 -0.0037 0.0137 0.0000
+cf_J_Eye02_L rotation 1.0000 -0.0010 0.0055 0.0056
+cf_J_Eye03_L rotation 1.0000 0.0035 -0.0234 0.0000
+cf_J_Eye04_L rotation 1.0000 -0.0010 0.0055 0.0015
+cf_J_EyePos_rz_L rotation 1.0000 0.0000 0.0000 0.0089
+cf_J_look_L rotation 1.0000 0.0000 -0.0011 0.0000
+cf_J_Eye_t_R offset 0.0452 -0.0117 -0.0133
+cf_J_Eye_t_R rotation 1.0000 0.0000 0.0000 0.0089
+cf_J_Eye_s_R scale 0.8462 0.8460 1.0000
+cf_J_Eye01_R rotation 1.0000 -0.0037 -0.0137 0.0000
+cf_J_Eye02_R rotation 1.0000 -0.0010 -0.0055 -0.0056
+cf_J_Eye03_R rotation 1.0000 0.0035 0.0234 0.0000
+cf_J_Eye04_R rotation 1.0000 -0.0010 -0.0055 -0.0015
+cf_J_EyePos_rz_R rotation 1.0000 0.0000 0.0000 -0.0089
+cf_J_look_R rotation 1.0000 0.0000 0.0011 0.0000
+cf_J_NoseBase_trs offset 0.0000 -0.0060 0.0044
+cf_J_NoseBase_s scale 0.9700 0.9850 0.9850
+cf_J_Nose_t offset 0.0000 0.0082 0.0000
+cf_J_Nose_t rotation 1.0000 -0.0082 0.0000 0.0000
+cf_J_Nose_tip offset 0.0000 -0.0004 -0.0005
+cf_J_Nose_tip scale 0.9526 0.9526 0.9526
+cf_J_NoseWing_tx_L offset -0.0006 0.0145 -0.0126
+cf_J_NoseWing_tx_L rotation 1.0000 -0.0035 0.0000 0.0070
+cf_J_NoseWing_tx_R offset 0.0006 0.0145 -0.0126
+cf_J_NoseWing_tx_R rotation 1.0000 -0.0035 0.0000 -0.0070
+cf_J_NoseBridge_t offset 0.0000 0.0147 -0.0045
+cf_J_NoseBridge_t rotation 1.0000 0.0236 0.0000 0.0000
+cf_J_NoseBridge_s scale 0.9622 1.0000 1.0000
+cf_J_Neck_s scale 1.1176 1.0000 1.0250
+cf_J_Shoulder_L rotation 0.9949 0.0585 -0.0350 0.0742
+cf_J_ArmUp00_L rotation 0.6781 -0.5476 -0.2043 -0.4457
+cf_J_ArmElbo_dam_01_L rotation 1.0000 0.0000 -0.0147 0.0000
+cf_J_ArmElbo_low_s_L scale 1.0000 1.0686 1.0686
+cf_J_ArmLow01_L rotation 0.8425 0.0000 -0.5387 0.0000
+cf_J_ArmLow01_s_L scale 1.0000 1.1554 1.1554
+cf_J_ArmLow02_s_L scale 1.0000 1.1554 1.1554
+cf_J_Hand_L rotation 0.7043 -0.6581 0.2343 0.1263
+cf_J_Hand_s_L scale 1.2420 1.2420 1.2420
+cf_J_Hand_Index01_L rotation 0.9869 0.0819 0.1176 -0.0741
+cf_J_Hand_Index02_L rotation 0.9553 0.0000 0.0000 -0.2956
+cf_J_Hand_Index03_L rotation 0.9621 0.0000 0.0000 -0.2727
+cf_J_Hand_Little01_L rotation 0.8766 0.1746 0.0924 -0.4388
+cf_J_Hand_Little02_L rotation 0.8674 0.0000 0.0000 -0.4977
+cf_J_Hand_Little03_L rotation 0.8712 0.0000 0.0000 -0.4908
+cf_J_Hand_Middle01_L rotation 0.9546 0.1258 0.1193 -0.2421
+cf_J_Hand_Middle02_L rotation 0.9171 0.0000 0.0000 -0.3986
+cf_J_Hand_Middle03_L rotation 0.9156 0.0000 0.0000 -0.4020
+cf_J_Hand_Ring01_L rotation 0.9122 0.1638 0.1166 -0.3569
+cf_J_Hand_Ring02_L rotation 0.9071 0.0000 0.0000 -0.4210
+cf_J_Hand_Ring03_L rotation 0.9030 0.0000 0.0000 -0.4297
+cf_J_Hand_Thumb01_L rotation 0.9979 0.0010 0.0097 -0.0640
+cf_J_Hand_Thumb02_L rotation 0.9902 0.0100 -0.1378 0.0206
+cf_J_Hand_Thumb03_L rotation 0.9988 0.0105 -0.0452 0.0131
+cf_J_Hand_Wrist_s_L scale 1.0000 1.0573 1.0573
+cf_J_Hand_dam_L rotation 1.0000 0.0000 -0.0177 0.0000
+cf_J_ArmUp01_s_L offset 0.0145 0.0197 0.0000
+cf_J_ArmUp01_s_L rotation 1.0000 0.0000 0.0000 -0.0167
+cf_J_ArmUp01_s_L scale 1.0000 1.2567 1.3538
+cf_J_ArmUp02_s_L scale 1.0000 1.1545 1.1545
+cf_J_ArmUp03_s_L scale 1.0000 1.1402 1.1175
+cf_J_ArmElboura_dam_L rotation 1.0000 0.0000 -0.0016 0.0000
+cf_J_Shoulder02_s_L offset 0.0364 0.0000 0.0000
+cf_J_Shoulder02_s_L scale 1.0500 1.1533 1.2081
+cf_J_Shoulder_R rotation 0.9757 0.1332 0.1118 -0.1332
+cf_J_ArmUp00_R rotation 0.7531 -0.1177 0.5054 0.4043
+cf_J_ArmElbo_dam_01_R rotation 1.0000 0.0000 0.0147 0.0000
+cf_J_ArmElbo_low_s_R scale 1.0000 1.0761 1.0760
+cf_J_ArmLow01_R rotation 0.5825 -0.0006 0.8129 -0.0007
+cf_J_ArmLow01_s_R scale 1.0000 1.1516 1.1516
+cf_J_ArmLow02_s_R scale 1.0000 1.1554 1.1554
+cf_J_Hand_R rotation 0.9632 -0.1989 -0.1286 -0.1272
+cf_J_Hand_s_R scale 1.2420 1.2420 1.2420
+cf_J_Hand_Index01_R rotation 0.9900 -0.0940 -0.0649 0.0832
+cf_J_Hand_Index02_R rotation 0.9920 0.0000 0.0000 0.1264
+cf_J_Hand_Index03_R rotation 0.9460 0.0000 0.0000 0.3243
+cf_J_Hand_Little01_R rotation 0.8587 -0.0147 -0.0669 0.5079
+cf_J_Hand_Little02_R rotation 0.8737 0.0000 0.0000 0.4864
+cf_J_Hand_Little03_R rotation 0.8745 0.0004 -0.0005 0.4851
+cf_J_Hand_Middle01_R rotation 0.9271 -0.0654 -0.0479 0.3658
+cf_J_Hand_Middle02_R rotation 0.9064 0.0000 0.0000 0.4224
+cf_J_Hand_Middle03_R rotation 0.9019 0.0000 0.0000 0.4320
+cf_J_Hand_Ring01_R rotation 0.9173 -0.0061 -0.1005 0.3852
+cf_J_Hand_Ring02_R rotation 0.8732 0.0000 0.0000 0.4873
+cf_J_Hand_Ring03_R rotation 0.8653 0.0000 0.0000 0.5012
+cf_J_Hand_Thumb01_R rotation 0.9498 0.0004 -0.0250 0.3119
+cf_J_Hand_Thumb02_R rotation 0.9988 0.0242 -0.0412 -0.0131
+cf_J_Hand_Thumb03_R rotation 0.8751 0.0585 -0.4804 -0.0025
+cf_J_Hand_Wrist_s_R scale 1.0000 1.0573 1.0573
+cf_J_Hand_dam_R rotation 1.0000 0.0000 0.0174 0.0000
+cf_J_ArmUp01_s_R offset -0.0145 0.0197 0.0000
+cf_J_ArmUp01_s_R rotation 1.0000 0.0000 0.0000 0.0167
+cf_J_ArmUp01_s_R scale 1.0000 1.2567 1.3537
+cf_J_ArmUp02_s_R scale 1.0000 1.1545 1.1545
+cf_J_ArmUp03_s_R scale 1.0000 1.1402 1.1175
+cf_J_Shoulder02_s_R offset -0.0364 0.0000 0.0000
+cf_J_Shoulder02_s_R scale 1.0500 1.1533 1.2081
+cf_J_Spine03_s scale 1.0957 1.0000 1.1074

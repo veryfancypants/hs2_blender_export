@@ -2,8 +2,8 @@ import bpy
 import os
 import bmesh
 import math
-from mathutils import Matrix, Vector, Euler
-
+from mathutils import Matrix, Vector, Euler, Quaternion
+import struct
 
 
 from bpy.props import (
@@ -11,6 +11,7 @@ from bpy.props import (
     EnumProperty,
     FloatProperty,
     PointerProperty,
+    StringProperty,
 )
 from bpy.types import (
     Operator,
@@ -27,11 +28,12 @@ def ShowMessageBox(message = "", title = "Message Box", icon = 'INFO'):
 eye_color=None
 hair_color=None
 use_config=False
+wipe_scene=False
 
 if not use_config:
     fbx='c:\\temp\\name.fbx'
     path='c:\\temp\\textures\\'
-    dump='c:\\temp\\dump.txt'
+    dumpfilename='c:\\temp\\dump.txt'
 else:
     cfg=open("C:\\temp\\hs2blender.cfg","r").readlines()
     waifus_path=cfg[0].strip()
@@ -41,14 +43,13 @@ else:
         if len(x)<2:
             continue
         y = x[1:]
-        print(x[0], y)
         if len(y)==1:
             conf[x[0]]=(y[0],)
         else:
             colors=[float(z) for z in y[1:7]]
             conf[x[0]]=(y[0], colors[0:3], colors[3:6])
 
-    name=""
+    name="Matthew2"
     path=waifus_path
     if path[-1]!='\\':
         path=path+'\\'
@@ -57,11 +58,11 @@ else:
     if len(cconf)>1:
         eye_color=cconf[1]
         hair_color=cconf[2]
-    dumps=[x for x in os.listdir(path) if x.endswith('.txt')]
+    dumps=[x for x in os.listdir(path) if x.endswith('.txt') and not x.startswith('pose_')]
     if len(dumps)>0:
-        dump=path+dumps[0]
+        dumpfilename=path+dumps[0]
     else:
-        dump=None
+        dumpfilename=None
         MessageBox('Failed to locate the dump')
     fbxs=[x for x in os.listdir(path) if x.endswith('.fbx')]
     if len(fbxs)>0:
@@ -81,7 +82,6 @@ if eye_color!=None:
     if len(eye_color)==3:
         eye_color=(eye_color[0], eye_color[1], eye_color[2], 1.0)
 
-
 bodyparts=[
 #bn,
 'o_eyebase_L',
@@ -96,9 +96,6 @@ bodyparts=[
 if path[-1]!='\\':
     path+='\\'
 
-chara={x:None for x in bodyparts}
-chara['o_forehead']=None
-
 def find_tex(x1, x2):
     f=os.listdir(path)
     for y in f:
@@ -107,7 +104,7 @@ def find_tex(x1, x2):
     return None
 
 def set_tex(obj, node, x, y, alpha=None, csp=None):
-    global chara
+    #global chara
     tex=find_tex(x, y)
     if tex==None:
         print('ERROR: failed to find texture ', x, y)
@@ -120,10 +117,7 @@ def set_tex(obj, node, x, y, alpha=None, csp=None):
         tex.alpha_mode='NONE'
     if csp!=None:
         tex.colorspace_settings.name=csp
-    if obj in chara:
-        chara[obj].materials[0].node_tree.nodes[node].image=tex
-    else:
-        bpy.data.meshes[obj].materials[0].node_tree.nodes[node].image=tex
+    obj.data.materials[0].node_tree.nodes[node].image=tex
     return True
 
 sc = bpy.data.scenes[0]
@@ -146,31 +140,42 @@ def join_meshes(v, name):
         bpy.data.objects[x].select_set(True)
     bpy.context.view_layer.objects.active = bpy.data.objects[v[0]] 
     bpy.ops.object.join()
-    bpy.data.objects[v[0]].name=name
+    final=bpy.data.objects[v[0]]
+    final.name=name
+    return final
 
 # the number of loose parts in the torso is variable depending on the uncensor
 # we have to work out which parts are which by looking at their coordinates
-def rebuild_torso():    
-    global chara
+def rebuild_torso(arm, body):
+    #global chara
     bpy.ops.object.mode_set(mode='OBJECT')
     bpy.ops.object.select_all(action='DESELECT')
-    bpy.context.view_layer.objects.active = bpy.data.objects[bn]
-    box = bbox(bpy.data.meshes[bn].vertices)
+    #body=bpy.data.objects[body.]
+    bpy.context.view_layer.objects.active = body
+    box = bbox(body.data.vertices)
     bpy.ops.object.mode_set(mode='EDIT')
     bpy.ops.mesh.separate(type='LOOSE')
     nails=[]
     other=[]
     junk=[]
-    for x in bpy.data.meshes.keys():
+    bn=body.name
+    if '.' in bn:
+        bn=bn.split('.')
+        bn=bn[0]
+    #for x in bpy.data.meshes.keys():
+    for ch in arm.children:
+        if ch.type!='MESH':
+            continue
+        x=ch.name
         if not x.startswith(bn):
             continue
-        b = bbox(bpy.data.meshes[x].vertices)
+        b = bbox(bpy.data.objects[x].data.vertices)
         #print(x, bpy.data.meshes[x].vertices[0].co, b, ( b[1][0]- b[0][0])/(box[1][0]-box[0][0]))
         if b[1][0]<box[0][0]+0.2*(box[1][0]-box[0][0]) \
          or b[0][0]>box[0][0]+0.8*(box[1][0]-box[0][0]) \
          or b[1][1]<box[0][1]+0.2*(box[1][1]-box[0][1]):
             nails.append(x)
-        elif b[0][1]>box[0][1]+0.90*(box[1][1]-box[0][1]):
+        elif b[0][1]>box[0][1]+0.96*(box[1][1]-box[0][1]):
             junk.append(x)
         else:
             other.append(x)
@@ -182,171 +187,151 @@ def rebuild_torso():
     if len(nails)!=20:
         print(len(nails))
         print("Warning: failed to find the right number of nails: reconstruct may fail")
-    join_meshes(nails, 'nails')
-    chara['nails']=bpy.data.meshes[nails[0]]
-    if boy:
+    nails=join_meshes(nails, 'nails')
+    if body['Boy']>0.0:
         if 'cm_o_dan00' in bpy.data.objects:
             other.append('cm_o_dan00')
         if 'cm_o_dan_f' in bpy.data.objects:
             other.append('cm_o_dan_f')            
-    join_meshes(other, bn)
+    body=join_meshes(other, bn)
+    body["nails"]=nails.name
+    return body
 
-def load_textures():
-    while len(chara['o_eyeshadow'].materials):
-        chara['o_eyeshadow'].materials.pop()
-    chara['o_eyeshadow'].materials.append(bpy.data.materials['Eyeshadow'])
-    set_tex('o_eyeshadow', 'Image Texture', 'eyekage', 'MainTex')    
+def replace_mat(obj, mat, name):
+    mat.name=name
+    while len(obj.data.materials):
+        obj.data.materials.pop()
+    obj.data.materials.append(mat)
+    return mat
 
-    eyelash_mat = bpy.data.materials['Eyelashes'].copy()
-    eyelash_mat.name = 'Eyelashes_' + suffix
-    while len(chara['o_eyelashes'].materials):
-        chara['o_eyelashes'].materials.pop()
-    chara['o_eyelashes'].materials.append(eyelash_mat)
-    set_tex('o_eyelashes', 'Image Texture', 'eyelashes', 'MainTex', csp='Non-Color')    
+def load_textures(arm, body):
+    head = bpy.data.objects[body["o_head"]]
+    tang = bpy.data.objects[body["o_tang"]]
+    tooth = bpy.data.objects[body["o_tooth"]]
+    eyeshadow = bpy.data.objects[body["o_eyeshadow"]]
+    eyelashes = bpy.data.objects[body["o_eyelashes"]]
+    eyebase_R = bpy.data.objects[body["o_eyebase_R"]]
+    eyebase_L = bpy.data.objects[body["o_eyebase_L"]]
+    nails = bpy.data.objects[body["nails"]]
+    body_parts={body, head, tang, tooth, eyeshadow, eyelashes, eyebase_L, eyebase_R, nails}
+    while len(eyeshadow.data.materials):
+        eyeshadow.data.materials.pop()
+    eyeshadow.data.materials.append(bpy.data.materials['Eyeshadow'])
+    set_tex(eyeshadow, 'Image Texture', 'eyekage', 'MainTex')    
+
+    eyelash_mat=replace_mat(eyelashes, bpy.data.materials['Eyelashes'].copy(),  'Eyelashes_' + suffix)
+    set_tex(eyelashes, 'Image Texture', 'eyelashes', 'MainTex', csp='Non-Color')    
     if hair_color!=None:
         eyelash_mat.node_tree.nodes['RGB'].outputs[0].default_value = hair_color
 
     eye_mat = bpy.data.materials['Eyes'].copy()
-    eye_mat.name = 'Eyes_' + suffix
-    while len(chara['o_eyebase_R'].materials):
-        chara['o_eyebase_R'].materials.pop()
-    chara['o_eyebase_R'].materials.append(eye_mat)
-    while len(chara['o_eyebase_L'].materials):
-        chara['o_eyebase_L'].materials.pop()
-    chara['o_eyebase_L'].materials.append(eye_mat)
-    set_tex('o_eyebase_L', 'Image Texture', 'eye', 'MainTex', csp='Non-Color')    
-    set_tex('o_eyebase_L', 'Image Texture.001', 'eye', 'Texture2', csp='Non-Color')    
-    set_tex('o_eyebase_L', 'Image Texture.002', 'eye', 'Texture3', csp='Non-Color')    
-    set_tex('o_eyebase_L', 'Image Texture.003', 'eye', 'Texture4', csp='Non-Color')    
+    replace_mat(eyebase_L, eye_mat, 'Eyes_' + suffix)
+    replace_mat(eyebase_R, eye_mat, 'Eyes_' + suffix)
+    set_tex(eyebase_L, 'Image Texture', 'eye', 'MainTex', csp='Non-Color')    
+    set_tex(eyebase_L, 'Image Texture.001', 'eye', 'Texture2', csp='Non-Color')    
+    set_tex(eyebase_L, 'Image Texture.002', 'eye', 'Texture3', csp='Non-Color')    
+    set_tex(eyebase_L, 'Image Texture.003', 'eye', 'Texture4', csp='Non-Color')    
     if eye_color!=None:
         eye_mat.node_tree.nodes['RGB'].outputs[0].default_value = eye_color
 
-    head_mat = bpy.data.materials['Head'].copy()
-    head_mat.name = 'Head_' + suffix
-    while len(chara['o_head'].materials):
-        chara['o_head'].materials.pop()
-    print(chara['o_head'])
-    chara['o_head'].materials.append(head_mat)
-    #return
-    set_tex('o_head', 'Image Texture', 'head', 'MainTex', alpha='NONE')
-    set_tex('o_head', 'Image Texture.002', 'head', 'DetailMainTex', csp='Non-Color')
-    set_tex('o_head', 'Image Texture.003', 'head', 'DetailGlossMap', csp='Non-Color')
-    set_tex('o_head', 'Image Texture.007', 'head', 'BumpMap_converted', csp='Non-Color')
-    if boy:
+    head_mat=replace_mat(head, bpy.data.materials['Head'].copy(), 'Head_' + suffix)
+    set_tex(head, 'Image Texture', 'head', 'MainTex', alpha='NONE')
+    set_tex(head, 'Image Texture.002', 'head', 'DetailMainTex', csp='Non-Color')
+    set_tex(head, 'Image Texture.003', 'head', 'DetailGlossMap', csp='Non-Color')
+    set_tex(head, 'Image Texture.007', 'head', 'BumpMap_converted', csp='Non-Color')
+    if body['Boy']>0.0:
         # No bump map 2
         head_mat.node_tree.nodes['Value.001'].outputs[0].default_value=0.0
         head_mat.node_tree.nodes['Value.003'].outputs[0].default_value=1.0 # Scale for textured gloss
         head_mat.node_tree.nodes['Math.002'].inputs[1].default_value = 0.850 # Subtract constant for textured gloss
         head_mat.node_tree.nodes['Vector Math.003'].inputs[3].default_value = 5.0 # UV coordinate scale for textured gloss
     else:
-        if not set_tex('o_head', 'Image Texture.006', 'head', 'BumpMap2_converted', csp='Non-Color'):
+        if not set_tex(head, 'Image Texture.006', 'head', 'BumpMap2_converted', csp='Non-Color'):
             head_mat.node_tree.nodes['Value.001'].outputs[0].default_value=0.0
     #head_mat.node_tree.nodes['Value'].outputs[0].default_value=0.0
-    set_tex('o_head', 'Image Texture.001', 'head', 'Texture3', csp='Non-Color')
+    set_tex(head, 'Image Texture.001', 'head', 'Texture3', csp='Non-Color')
     if hair_color!=None:
         head_mat.node_tree.nodes['RGB'].outputs[0].default_value = hair_color
-    tongue_mat = bpy.data.materials['Tongue'].copy()
-    tongue_mat.name = 'Tongue_' + suffix
-    while len(chara['o_tang'].materials):
-        chara['o_tang'].materials.pop()
-    chara['o_tang'].materials.append(tongue_mat)
-    set_tex('o_tang', 'Image Texture', 'tang', 'MainTex')
-    set_tex('o_tang', 'Image Texture.001', 'tang', 'BumpMap_converted', csp='Non-Color')
-    set_tex('o_tang', 'Image Texture.002', 'tang', 'DetailGlossMap', csp='Non-Color')
 
-    teeth_mat = bpy.data.materials['Teeth'].copy()
-    teeth_mat.name = 'Teeth_' + suffix
-    while len(chara['o_tooth'].materials):
-        chara['o_tooth'].materials.pop()
-    chara['o_tooth'].materials.append(teeth_mat)
-    set_tex('o_tooth', 'Image Texture', 'tooth', 'MainTex')
-    set_tex('o_tooth', 'Image Texture.001', 'tooth', 'BumpMap_converted', csp='Non-Color')
+    replace_mat(tang, bpy.data.materials['Tongue'].copy(), 'Tongue_' + suffix)
+    set_tex(tang, 'Image Texture', 'tang', 'MainTex')
+    set_tex(tang, 'Image Texture.001', 'tang', 'BumpMap_converted', csp='Non-Color')
+    set_tex(tang, 'Image Texture.002', 'tang', 'DetailGlossMap', csp='Non-Color')
 
-    body_mat = bpy.data.materials['Torso'].copy()
-    body_mat.name = 'Torso_' + suffix
-    while len(chara[bn].materials):
-        chara[bn].materials.pop()
-    chara[bn].materials.append(body_mat)
-    set_tex(bn, 'Image Texture', 'body', 'MainTex', alpha='NONE')
-    set_tex(bn, 'Image Texture.005', 'body', 'DetailGlossMap', csp='Non-Color')
-    set_tex(bn, 'Image Texture.002', 'body', 'BumpMap_converted', csp='Non-Color')
-    set_tex(bn, 'Image Texture.003', 'body', 'BumpMap2_converted', csp='Non-Color')
+    replace_mat(tooth, bpy.data.materials['Teeth'].copy(), 'Teeth_' + suffix)
+    set_tex(tooth, 'Image Texture', 'tooth', 'MainTex')
+    set_tex(tooth, 'Image Texture.001', 'tooth', 'BumpMap_converted', csp='Non-Color')
+
+    replace_mat(body, bpy.data.materials['Torso'].copy(), 'Torso_' + suffix)
+    set_tex(body, 'Image Texture', 'body', 'MainTex', alpha='NONE')
+    set_tex(body, 'Image Texture.005', 'body', 'DetailGlossMap', csp='Non-Color')
+    set_tex(body, 'Image Texture.002', 'body', 'BumpMap_converted', csp='Non-Color')
+    set_tex(body, 'Image Texture.003', 'body', 'BumpMap2_converted', csp='Non-Color')
     #body_mat.node_tree.nodes['Value'].outputs[0].default_value=0.0
     #body_mat.node_tree.nodes['Value.001'].outputs[0].default_value=0.0
-    if boy:
-        bpy.data.objects[bn]['Boy']=1.0
-    set_tex(bn, 'Image Texture.001', 'body', 'Texture2', csp='Non-Color')    
+    set_tex(body, 'Image Texture.001', 'body', 'Texture2', csp='Non-Color')    
 
-    while len(chara['nails'].materials):
-        chara['nails'].materials.pop()
-    chara['nails'].materials.append(bpy.data.materials['Nails'])
-    
-    for x in bpy.data.objects.keys():
-        if 'hair' in x or (bpy.data.objects[x].type=='MESH' \
-                and not ('Prefab ' in x) \
-                and not ('Material ' in x) \
-                and len(bpy.data.objects[x].data.materials)>0 \
+    replace_mat(nails, bpy.data.materials['Nails'].copy(), 'Nails_' + suffix)
+    for ch in arm.children:
+        x=ch.name
+        obj = bpy.data.objects[x]
+        mesh = obj.data
+        if (bpy.data.objects[x].type!='MESH' 
+                or ('Prefab ' in x) \
+                or ('Material ' in x)):
+            continue
+        elif ('hair' in x) or (len(bpy.data.objects[x].data.materials)>0 \
                 and 'hair' in bpy.data.objects[x].data.materials[0].name):
             print('Texturing', x, 'as hair')
-            mesh = bpy.data.objects[x].data
             m = mesh.materials[0]
             n = m.name
             if '.' in n:
-                n = n.split('.')[0]            
-            while len(mesh.materials):
-                mesh.materials.pop()
-            mat = bpy.data.materials['test_hair'].copy()
-            mesh.materials.append(mat)
-            set_tex(mesh.name, 'Image Texture', n, 'MainTex', csp='Non-Color')
-            set_tex(mesh.name, 'Image Texture.001', n, 'BumpMap_converted', csp='Non-Color')
+                n = n.split('.')[0]   
+            mat=replace_mat(obj, bpy.data.materials['test_hair'].copy(), 'hair_' + suffix)                                 
+            set_tex(obj, 'Image Texture', n, 'MainTex', csp='Non-Color')
+            set_tex(obj, 'Image Texture.001', n, 'BumpMap_converted', csp='Non-Color')
             if hair_color!=None:
                 mat.node_tree.nodes['Principled BSDF'].inputs['Base Color'].default_value = hair_color
-            
-    for x in bpy.data.objects.keys():
-        if x.startswith('o_') and not x in chara:
-            print(x)
-            mesh = bpy.data.objects[x].data
+        elif obj.type=='MESH' and not obj in body_parts:
+            if len(mesh.materials)>1:
+                print('Not trying to texture', x, ' - too many materials')
+                continue
+            print('Trying to texture', x, 'as clothing')
             m = mesh.materials[0]
             n = m.name
             if '.' in n:
                 n = n.split('.')[0]            
-            while len(mesh.materials):
-                mesh.materials.pop()
-            mat = bpy.data.materials['Clothing'].copy()
-            mesh.materials.append(mat)
-            set_tex(mesh.name, 'Image Texture', n, 'MainTex', csp='Non-Color')
-            set_tex(mesh.name, 'Image Texture.001', n, 'DetailGlossMap', csp='Non-Color')
-            if not set_tex(mesh.name, 'Image Texture.002', n, 'OcclusionMap', csp='Non-Color'):
+            mat=replace_mat(obj, bpy.data.materials['Clothing'].copy(), 'clothing_' + suffix)                                 
+            set_tex(obj, 'Image Texture', n, 'MainTex', csp='Non-Color')
+            set_tex(obj, 'Image Texture.001', n, 'DetailGlossMap', csp='Non-Color')
+            if not set_tex(obj, 'Image Texture.002', n, 'OcclusionMap', csp='Non-Color'):
                 # Item does not support clothes damage
                 mat.node_tree.nodes['Value'].outputs[0].default_value=-0.01
 
-def fixup_head():
+def fixup_head(body):
     bpy.ops.object.select_all(action='DESELECT')
-    bpy.context.view_layer.objects.active = bpy.data.objects['o_head']
+    bpy.context.view_layer.objects.active = bpy.data.objects[body["o_head"]]
     bpy.ops.object.mode_set(mode='EDIT')
     bpy.ops.mesh.select_non_manifold()
     bpy.ops.mesh.remove_doubles()
 
-def fixup_torso():
+def fixup_torso(body):
     bpy.ops.object.mode_set(mode='OBJECT')
     bpy.ops.object.select_all(action='DESELECT')
-    join_meshes([bn,'nails'], bn)
+    join_meshes([body.name, body["nails"]], body.name)
     bpy.ops.object.select_all(action='DESELECT')
-    bpy.context.view_layer.objects.active = bpy.data.objects[bn]
+    bpy.context.view_layer.objects.active = body
     bpy.ops.object.mode_set(mode='EDIT')
     bpy.ops.mesh.select_non_manifold()
     bpy.ops.mesh.remove_doubles(use_unselected=True)
 
-def stitch_head_to_torso():
-    tv=bpy.data.meshes[bn].vertices
-    hv=bpy.data.meshes['o_head'].vertices
-    error = 0.01
+def stitch_head_to_torso(body):
     bpy.ops.object.mode_set(mode='OBJECT')
     bpy.ops.object.select_all(action='DESELECT')
-    meshes=[bn,'o_head','o_eyebase_L','o_eyebase_R','o_eyelashes','o_eyeshadow']
-    join_meshes(meshes, 'body')
+    meshes=[body.name,body['o_head'],body['o_eyebase_L'],body['o_eyebase_R'],body['o_eyelashes'],body['o_eyeshadow']]
+    join_meshes(meshes, body.name)
     bpy.ops.object.select_all(action='DESELECT')
-    bpy.context.view_layer.objects.active = bpy.data.objects['body']
+    bpy.context.view_layer.objects.active = body
     bpy.ops.object.mode_set(mode='EDIT')
     bpy.ops.mesh.select_all(action='DESELECT')
     bpy.ops.mesh.select_non_manifold()
@@ -356,23 +341,35 @@ def stitch_head_to_torso():
     bpy.ops.mesh.select_all(action='DESELECT')
     
 def import_bodyparts():
-    global chara
-    global bn
-    global boy
-    for bpy_data_iter in (bpy.data.objects, bpy.data.meshes):
-        for id_data in bpy_data_iter:
-            if  id_data.name!="Cube" and id_data.name!="Material Cube" and not id_data.name.startswith('Prefab '):
-                bpy_data_iter.remove(id_data)
-    bpy.ops.import_scene.fbx(filepath=fbx)
-    boy = ('o_body_cm' in bpy.data.objects)
-    bn='o_body_cm' if boy else 'o_body_cf'
-    bodyparts.append(bn)
-    chara[bn]=None
+    if wipe_scene:
+        for bpy_data_iter in (bpy.data.objects, bpy.data.meshes):
+            for id_data in bpy_data_iter:
+                if  id_data.name!="Cube" and id_data.name!="Material Cube" and not id_data.name.startswith('Prefab '):
+                    bpy_data_iter.remove(id_data)
+    try:
+        bpy.ops.import_scene.fbx(filepath=fbx)
+    except:
+        return False, None, None
+    if not 'Armature' in bpy.data.objects:
+        return False, None, None
+    arm = bpy.data.objects['Armature']
+    
+    boy = False
+    bn=None
+    for x in arm.children:
+        if x.name.startswith('o_body_cm'):
+            boy = True
+            bn = x.name
+            break
+        elif x.name.startswith('o_body_cf'):
+            bn = x.name
+            break
+    if bn==None:
+        print('Could not find the body mesh in this fbx')
+        return False, None, None
+    body = bpy.data.objects[bn]
+    body['Boy']=1.0 if boy else 0.0
 
-    for x in bodyparts:
-        for y in bpy.data.meshes.keys(): #sc.objects.keys():
-            if y==x or y.startswith(x+'.'):
-                chara[x]=bpy.data.meshes[y]
     for bpy_data_iter in (bpy.data.objects, bpy.data.meshes):
         for id_data in bpy_data_iter:
             if id_data.name.startswith('k_') \
@@ -383,198 +380,42 @@ def import_bodyparts():
             or (bpy_data_iter==bpy.data.objects and id_data.type=='EMPTY'):                
                 bpy_data_iter.remove(id_data)
     bpy.data.objects.remove(bpy.data.objects['o_namida'])
-    if (not boy) and bn+'.001' in bpy.data.objects:
-        bpy.data.objects[bn+'.001'].name=bn
-    #TODO: delete all the Empty objects and hierarchies    
-    if not 'o_head' in bpy.data.meshes:
-        heads=[x for x in bpy.data.meshes.keys() if x.startswith('o_head')]
-        if len(heads)==1:
-            bpy.data.meshes[heads[0]].name='o_head'
-    arm = bpy.data.objects['Armature']
-    body = arm.children[0]
+    #if (not boy) and bn+'.001' in bpy.data.objects:
+    #    bpy.data.objects[bn+'.001'].name=bn
+    #if not 'o_head' in arm.children.keys(): #bpy.data.meshes:
+    #    heads=[x for x in arm..keys() if x.startswith('o_head')]
+    #    if len(heads)==1:
+    #        bpy.data.meshes[heads[0]].name='o_head'
+    for x in bodyparts:
+        for y in arm.children: #bpy.data.meshes.keys(): #sc.objects.keys():
+            if y.name==x or y.name.startswith(x+'.'):
+                body[x]=y.name #bpy.data.meshes[y]
+            
     bpy.context.view_layer.objects.active = arm
     bpy.ops.object.mode_set(mode='OBJECT')
     bpy.ops.object.scale_clear()                
     #bpy.ops.object.rotation_clear()
-    return True
+    return True, arm, body
 
-class char_shape:
-    offset_bones=[
-    ('cf_J_ArmUp00_L', 'x'),
-    ('cf_J_CheekLow_L', 'xyz'),
-    ('cf_J_CheekUp_L', 'xyz'),
-    ('cf_J_Chin_rs', 'yz'),
-    ('cf_J_ChinLow', 'y'),
-    ('cf_J_EarLow_L', 'xyz'),
-    ('cf_J_EarUp_L', 'xyz'),
-    ('cf_J_Eye_t_L', 'xyz'),
-    ('cf_J_FaceLowBase', 'z'),
-    ('cf_J_FaceUp_ty', 'y'),
-    ('cf_J_FaceUp_tz', 'z'),
-    ('cf_J_Mouth_L', 'y'),
-    ('cf_J_MouthBase_tr', 'yz'),
-    ('cf_J_MouthLow', 'yz'),
-    ('cf_J_Mouthup', 'y'),
-    ('cf_J_Nose_r', 'y'),
-    ('cf_J_Nose_t', 'yz'),
-    ('cf_J_Nose_tip', 'yz'),
-    ('cf_J_NoseBase_trs', 'yz'),
-    ('cf_J_NoseBridge_t', 'yz'),
-    ('cf_J_NoseWing_tx_L', 'xyz'),
-    ('cf_J_MouthCavity', 'z'), # moves mouth+teeth+tongue forward-back
-    ('cf_J_LegUp00_L', 'xyz'), #  1 axis: 0.71906 -0.40854  -0.0817
-    ('cf_J_Mune00_L', 'xyz'), #
-    ('cf_J_Mune00_s_L', 'xyz'), #
-    ('cf_J_Mune00_t_L', 'xyz'), #
-    ('cf_J_Mune00_d_L', 'xz'), #  (possibly 1-d)
-    ('cf_J_Mune01_s_L', 'yz'), #
-    ('cf_J_Mune02_L', 'xyz'), #
-    ('cf_J_Mune02_s_L', 'yz'), #
-    ('cf_J_Mune_Nip01_L', 'y'), # (?) (very small)
-    ('cf_J_Mune_Nip01_s_L', 'z'), #
-    ('cf_J_Mune_Nip02_L', 'y'), #
-    ('cf_J_Mune_Nip02_s_L', 'z'), #
-    ('cf_J_Mune03_L', 'xyz'), # (small)
-    ('cf_J_Mune03_s_L', 'z'), #
-    ('cf_J_Mune04_s_L', 'yz'), # (small)
 
-    #Variable offset soft bones:
-    ('cf_J_ArmUp01_s_L',  'xy'), #   upper muscle pos along the arm, vertical
-    ('cf_J_ArmUp02_s_L',  'y'), #    biceps pos along the arm
-    ('cf_J_ChinTip_s',  'yz'), #
-    ('cf_J_LegKnee_back_s_L',  'z'), #
-    ('cf_J_LegKnee_low_s_L',  'z'), #
-    ('cf_J_LegLow03_s_L',  'xz'), # adjusts ankle just above the foot joint; x left-right, z forward-back
-    ('cf_J_LegUp01_s_L',  'xz'), # adjusts upper thigh just below the hip joint; x left-right, z forward-back
-    ('cf_J_Shoulder02_s_L',  'x'), #', #   shoulder shape
-    ('cf_J_Siri_s_L',  'xyz'), #
-    ('cf_J_Spine01_s',  'yz'), #
-    ]
-    scale_bones={
-    'cf_N_height':  'xyz', #  - overall dimensions of the torso (roughly groin to neck)
-    'cf_J_ArmUp00_L':  'xyz', # - overall arm scale 
-    'cf_J_LegUp00_L':  'xyz', # - overall leg scale
-    'cf_J_Foot01_L':  'xyz', # - overall foot scale
-    'cf_J_Hand_s_L':  'xyz', # - overall hand scale
-    'cf_J_Kosi01_s': 'xz',
-    'cf_J_Kosi02_s': 'xz',
-    'cf_J_LegKnee_low_s_L': 'xyz',
-    'cf_J_LegLow01_s_L': 'xz',
-    'cf_J_LegLow03_s_L': 'xz',
-    'cf_J_LegLow02_s_L': 'xz',
-    'cf_J_LegU': 'xz',
-    'cf_J_LegUp01_s_L': 'xz',
-    'cf_J_LegUp02_s_L': 'xz',
-    'cf_J_LegUp03_s_L': 'xz',
-    'cf_J_LegKnee_back_s_L': 'xz',
-    'cf_J_Siri_s_L': 'xyz',
-    'cf_J_LegUpDam_s_L': 'xz',
-    'cf_J_Spine01_s': 'xz',
-    'cf_J_Spine02_s': 'xz',
-    'cf_J_Mune00_t_L': 'xyz',
-    'cf_J_Neck_s': 'xz',
-    'cf_J_Spine03_s': 'xz',
-
-    'cf_J_Mune00_s_L': 'xyz',
-    'cf_J_Mune01_s_L': 'xyz',
-    'cf_J_Mune02_s_L': 'xyz',
-    'cf_J_Mune03_s_L': 'xyz',
-    'cf_J_Mune04_s_L': 'xyz',
-    'cf_J_Mune_Nip01_s_L': 'xyz',
-    'cf_J_Head_s': 'xyz',
-    'cf_J_ChinTip_s': 'xyz',
-    'cf_J_EarBase_s_L': 'xyz',
-    'cf_J_EarUp_L': 'xyz',
-    'cf_J_EarLow_L': 'xyz',
-    'cf_J_NoseBase_s': 'xyz',
-    'cf_J_Nose_tip': 'xyz',
-
-    'cf_J_FaceBase': 'xz',
-    'cf_J_FaceLow_s': 'x',
-    'cf_J_Chin_rs': 'x',
-    'cf_J_MouthLow': 'x',
-    'cf_J_MouthBase_s': 'xy',
-    'cf_J_Eye_s_L': 'xy',
-    'cf_J_NoseBridge_s': 'x',
-
-    'cf_J_ArmElbo_low_s_L': 'yz',
-    'cf_J_ArmLow01_s_L': 'yz',
-    'cf_J_ArmLow02_s_L': 'yz',
-    'cf_J_Hand_Wrist_s_L': 'yz',
-    'cf_J_ArmUp01_s_L': 'yz',
-    'cf_J_ArmUp02_s_L': 'yz',
-    'cf_J_ArmUp03_s_L': 'yz',
-    'cf_J_Shoulder02_s_L': 'xyz',
-    'cf_J_Ana': 'xyz',
-    'cf_J_ArmElboura_s_L': 'z',
-    'cf_J_Mune_Nip02_s_L': 'xyz'
-    }
-    def __init__(self):
-        self.scales={}
-        self.default_offsets={}
-        self.offsets={}
-        return
-    def set_scale(self, name, v):
-        if name.endswith('R'):
-            return
-        if not name in char_shape.scale_bones:
-            print(name, v[0], v[1], v[2]) #'Bone ', name, 'is not expected')
-            return
-        for c in range(3):
-            if abs(v[c]-1)>0.005 and not chr(ord('x')+c) in char_shape.scale_bones[name]:
-                print('Unexpected large scale ', c, ' in ', name, v[0], v[1], v[2])
-        self.scales[name]=v
-
-    def serialize(self):
-        of=open("c:\\temp\\scales_"+name+".txt", "w")
-        for x in self.scales:
-            s=x+(' %.4f %.4f %.4f\n' % (self.scales[x][0], self.scales[x][1], self.scales[x][2]))
-            of.write(s)
-        of.close()
-    def deserialize(self):
-        try:
-            of=open("c:\\temp\\scales_"+name+".txt", "r")
-            if of==None:
-                return False
-            for x in of.readlines():
-                y=x.strip().split()
-                self.scales[y[0]]=[float(y[1]),float(y[2]),float(y[3])]
-            of.close()
-            of=open("c:\\temp\\shape_default.txt","r")
-            for x in of.readlines():
-                y=x.strip().split()
-                self.default_offsets[y[0]]=[float(y[1]),float(y[2]),float(y[3])]
-            of=open("c:\\temp\\shape_"+name+".txt","r")
-            for x in of.readlines():
-                y=x.strip().split()
-                self.offsets[y[0]]=[float(y[1]),float(y[2]),float(y[3])]
-            return True
-        except:
-            return False
-
-bone_pos={}
-bone_w2l={}
-bone_parent={}
-root_pos=[0,0,0]
-
-def load_unity_dump():
-    global root_pos
-    global bone_pos
+def load_unity_dump(dump):
+    bone_pos={}
+    bone_w2l={}
+    bone_parent={}
+    root_pos=[0,0,0]
+    local_pos={}
     name=''
-    global bone_parent
-    global bone_w2l
-    global dump
-    dump=open(dump,'r').readlines()
-    dump=[x.strip() for x in dump]
-    if 'cf_J_Root' in dump[0]:
-        dump[0]='cf_J_Root--UnityEngine.GameObject'
+    f=open(dump,'r').readlines()
+    f=[x.strip() for x in f]
+    if 'cf_J_Root' in f[0]:
+        f[0]='cf_J_Root--UnityEngine.GameObject'
     else:
-        print(dump[0])
+        print(f[0])
         MessageBox('ERROR: Could not parse the dump file')
-        return False
+        return None, None
 
-    for n in range(len(dump)):
-        x=dump[n]
+    for n in range(len(f)):
+        x=f[n]
         if x.endswith('--UnityEngine.GameObject'):
            name=x.split('-')[0]
            #print(name)
@@ -588,9 +429,9 @@ def load_unity_dump():
                 continue
             m=[
                 x.split()[-4:],
-                dump[n+1].split()[-4:],
-                dump[n+2].split()[-4:],
-                dump[n+3].split()[-4:] ]
+                f[n+1].split()[-4:],
+                f[n+2].split()[-4:],
+                f[n+3].split()[-4:] ]
             m=[[float(y) for y in z] for z in m]
             if x.startswith('@worldToLocalMatrix'):
                 bone_w2l[name]=m
@@ -614,8 +455,12 @@ def load_unity_dump():
                 if m[2][0]==0.0 and m[2][1]==0.0 and m[2][2]==0.0:
                     m[2][2]=0.0010
                 bone_pos[name]=Matrix(m)
+                if bone_parent[name] in bone_pos:
+                    local_pos[name]=bone_pos[bone_parent[name]].inverted() @ bone_pos[name]
+                else:
+                    local_pos[name] = bone_pos[name]
+    return bone_pos, local_pos
 
-    
 def matrix_world(armature_ob, bone_name):
     local = armature_ob.data.bones[bone_name].matrix_local
     basis = armature_ob.pose.bones[bone_name].matrix_basis
@@ -695,6 +540,321 @@ def dump_one_bone_current(x, a, of):
         of.write(s)        
     for x in b.children.keys():
         dump_one_bone_current(x, a, of)
+        
+#  This long table classifies all the various bones inside the armature, allowing us to distinguish between
+# variables we change to customize the character (e.g. game 'shoulder width'), variables we change to pose the character,
+# variables that the game sets according to some internal rules, and variables we should not touch.
+# 
+# 'f': Pure FK bone. Only rotations allowed. Shorthand for 'xxxfxxx'
+# 'c': Constrained helper bone. Position constrained by internal rules, no direct manipulation. Shorthand for 'xxxcxxx'.
+# '?': unclassified or ignored
+# 7-letter codes: 3 letters for offset (x/y/z), 1 letter for rotation, 3 letters for scale.
+# 
+# 'x': locked at default value (1 for quat w and scale, 0 for other dof), no direct manipulation.
+# 'c': constrained by other attributes, no direct manipulation, must reset to default when loading pose
+# 's': soft, affects character's intrinsic shape
+# 'f': FK, affects character's pose
+# 'i': seeing small numbers here, assume they may be ignored; flag and report if seeing a large value
+# 'u': potentially large numbers of unknown origin with nontrivial effect on mesh
+# 
+# Most 'u's may be "static constraints": small, constant for the same character, not settable directly from UI.
+#
+# some notable unexplained dynamic dof: 
+# LegUp01_L/R rotation (along 1 axis)
+# Mune00 rotation 
+#
+bone_classes={
+'cf_N_height': 'xxxxsss', #overall body scale
+'cf_J_Kosi01_s': 'xxxxsxs',
+'cf_J_Kosi02_s': 'xxxxsxs',
+'cf_J_Kokan': 'xxxxsss',
+
+'cf_J_SiriDam_': 'c',
+'cf_J_Siri_s_': 'sssssss', # I'm positive the game does not give me this much control (9 deg of freedom) over butt cheeks
+'cf_J_Siriopen_s_': '?', # effect unclear - my meshes don't even have vgroups for it
+'cf_J_Ana': 'sssssss',  # same as with cf_J_Siri_s_
+'cf_J_LegUpDam_': 'xxxcxxx',
+'cf_J_LegUpDam_s_': 'xxxxsxs',
+
+'cf_J_LegUp00_': 'sssfsss', # game allows legup00 offset to travel along 1 axis only - offsets y and z are proportional to x
+'cf_J_LegUp01_': 'xxxuxxx',
+'cf_J_LegUp01_s_': 'uxuusxs', # no dynamic constraint
+'cf_J_LegUp02_': 'xxxcxxx',
+'cf_J_LegUp02_s_': 'xxxxsxs', 
+'cf_J_LegUp03_s_': 'xxxxsxs', 
+
+'cf_J_LegKnee_dam_': 'c',
+'cf_J_LegKnee_low_s_': 'xxucsss', # no dynamic constraint
+'cf_J_LegKnee_back_': 'xxxcxxx',  # r - dynamic constraint
+'cf_J_LegKnee_back_s_': 'xxsxsss', # no dynamic constraint
+
+'cf_J_LegLow01_s_': 'ixuisxs', # no dynamic constraint
+'cf_J_LegLow02_s_': 'xxxxsxs', # no dynamic constraint
+'cf_J_LegLow03_s_': 'uxuusxs', # no dynamic constraint
+
+'cf_J_Foot01_': 'xxxfsss',
+'cf_J_Foot02_': 'f',
+'cf_J_Toes01_': 'f',
+'cf_J_Toes_Hallux1_': 'sssfsss',
+'cf_J_Toes_Long1_': 'sssfsss',
+'cf_J_Toes_Middle1_': 'sssfsss',
+'cf_J_Toes_Ring1_': 'sssfsss',
+'cf_J_Toes_Pinky1_': 'sssfsss',
+
+'cf_J_Spine01_s': 'uuuxsss', # not dynamic
+'cf_J_Spine02_s': 'xxxxsxs', 
+'cf_J_Spine03_s': 'xxxxsxs', # 
+
+'cf_J_Shoulder_': 'f',
+'cf_J_Shoulder02_s_': 'sxxxsss',# presumably, same x offset as on cf_J_ArmUp00
+'cf_J_ArmUp00_': 'sxufsss', # not dynamic
+'cf_J_ArmUp01_dam_': 'xxxcxxx', 
+'cf_J_ArmUp02_dam_': 'xxxcxxx',
+'cf_J_ArmUp01_s_': 'uuuuxss',  # no dynamic constraint
+'cf_J_ArmUp02_s_': 'xixxxss',
+'cf_J_ArmUp03_s_': 'xxxxxss',
+'cf_J_ArmElbo_dam_01_': 'cxccxxx', # dynamic constraint on position and rotation
+'cf_J_ArmElbo_low_s_': 'xxxxxss',
+'cf_J_ArmElboura_dam_': 'xxxcxxx',
+'cf_J_ArmElboura_s_': 'xxsxxxx',
+'cf_J_ArmLow01_': 'f',
+'cf_J_ArmLow01_s_': 'xxxxxss',
+'cf_J_ArmLow02_s_': 'xxxxxss',
+'cf_J_ArmLow02_dam_': 'xxxcxss',
+'cf_J_Hand_Wrist_dam_': 'xxxcxxx',
+'cf_J_Hand_': 'f',
+'cf_J_Hand_s_': 'xxxxsss',
+'cf_J_Hand_Wrist_s_': 'xxxxxss',
+'cf_J_Hand_dam_': 'c',
+
+'cf_J_Hand_Index01_': 'f',
+'cf_J_Hand_Index02_': 'f',
+'cf_J_Hand_Index03_': 'f',
+'cf_J_Hand_Little01_': 'f',
+'cf_J_Hand_Little02_': 'f',
+'cf_J_Hand_Little03_': 'f',
+'cf_J_Hand_Middle01_': 'f',
+'cf_J_Hand_Middle02_': 'f',
+'cf_J_Hand_Middle03_': 'f',
+'cf_J_Hand_Ring01_': 'f',
+'cf_J_Hand_Ring02_': 'f',
+'cf_J_Hand_Ring03_': 'f',
+'cf_J_Hand_Thumb01_': 'f',
+'cf_J_Hand_Thumb02_': 'f',
+'cf_J_Hand_Thumb03_': 'f',
+
+'cf_J_Hips': 'ffffxxx',
+'cf_J_Kosi01': 'f',
+'cf_J_Kosi02': 'f',
+'cf_J_LegLow01_': 'f',
+'cf_J_Spine01': 'f',
+'cf_J_Spine02': 'f',
+'cf_J_Spine03': 'f',
+'cf_J_Mune00': 'xccfxxx',
+'cf_J_Neck': 'f',
+'cf_J_Head': 'f',
+
+'cf_J_Mune00_': 'iuuuxxx',
+'cf_J_Mune00_t_':'sssssss',
+'cf_J_Mune00_s_':'sssssss',
+'cf_J_Mune00_d_':'sxssxxx',
+'cf_J_Mune01_': 'xiiixxx',
+'cf_J_Mune01_s_': 'xssssss',
+'cf_J_Mune01_t_': 'sxssxxx',
+'cf_J_Mune02_': 'xiiixxx',
+'cf_J_Mune02_s_': 'xisssss',
+'cf_J_Mune02_t_': 'xxssxxx',
+'cf_J_Mune03_': 'xiixxxx',
+'cf_J_Mune03_s_': 'xxsxsss',
+'cf_J_Mune04_s_': 'xxsxsss',
+'cf_J_Mune_Nip01_s_': 'xxsxsss',
+'cf_J_Mune_Nip02_s_': 'xxixsss',
+
+#todo: where's the head offset
+'cf_J_FaceBase': 'xxxxsxs',
+'cf_J_Head_s': 'xxxxsss', 
+'cf_J_FaceLowBase': 'xxuxxxx',
+'cf_J_FaceLow_s': 'xxxxsxx',
+'cf_J_CheekLow_': 'sssxxxx',
+'cf_J_CheekUp_': 'sssxxxx',
+'cf_J_Chin_rs': 'xsissss',
+'cf_J_ChinTip_s': 'xuuxsss',
+'cf_J_ChinLow': 'xsxxxxx',
+'cf_J_MouthBase_tr': 'xssxxxx',
+'cf_J_MouthBase_s': 'xxxxssx',
+'cf_J_Mouth_': 'xsxsxxx', # offset Y moves the mouth corner up/down, quat Z turns the mouth corner
+'cf_J_MouthLow': 'xssxsxx', # position & width of the lower lip
+'cf_J_Mouthup': 'xuxxxxx',
+'cf_J_MouthCavity': 'xxixxxx',
+'cf_J_EarLow_': 'xsxxsss',
+'cf_J_EarUp_': 'sssisss',
+'cf_J_EarBase_s_': 'xxxssss',
+'cf_J_FaceUp_ty': 'xsxxxxx', # upper face height (moves eyes, ears and everything above them up/down)
+'cf_J_FaceUp_tz': 'xxsxxxx', # upper face depth (moves eyes and eyebrows forward/back)
+# the chain is t -> s -> r -> eyepos_rz -> look
+'cf_J_Eye_t_': 'ssssxxx', # offset moves the eye; quat z rotates the eyelids around the forward-back axis
+'cf_J_Eye_s_': 'xxxxssx', # scale x,y scales the eye
+'cf_J_Eye_r_': 'xxxsxxx', # quat y rotates the eyelids around the vertical axis; quat z would rotate around the forward-back axis
+'cf_J_EyePos_rz_': 'xxxuxxx', # observed nontrivial quat z - rotating the eyeball around the forward axis
+'cf_J_look_': 'f',
+
+'cf_J_Eye01_': 'xxxcxxx', # how does the game set rotation?
+'cf_J_Eye02_': 'xxxcxxx', # how does the game set rotation?
+'cf_J_Eye03_': 'iiicxxx', # how does the game set rotation?
+'cf_J_Eye04_': 'xxxcxxx', # how does the game set rotation?
+'cf_J_NoseBase_trs': 'xssxxxx',
+'cf_J_NoseBase_s': 'xxxssss', # rotation: nose angle, X-axis only
+'cf_J_Nose_t': 'xissxxx',  # offset z moves nose (minus bridge) forward/back; quat x turns nose up/down
+'cf_J_Nose_tip': 'xssxsss', # moves and scales the nose tip
+'cf_J_NoseWing_tx_': 'ssssxxx', # offset moves the nostril; rotation twists the nostril in odd ways
+'cf_J_NoseBridge_t': 'xsssxxx', # nose bridge vertical position (y), height (z), & shape (r)
+'cf_J_NoseBridge_s': 'xxxxsxx', # nose bridge width
+'cf_J_Neck_s': 'xxxxsss', # how does the game set y-scale?
+
+'cf_J_EarRing_': '?',
+}
+
+def bone_class(x, comp):
+    c=None
+    if x.startswith('cf_J_Vagina') or x.startswith('cf_J_Legsk'):
+        return '?'
+    elif x in bone_classes:
+        c = bone_classes[x]
+    elif x[:-1] in bone_classes:
+        c = bone_classes[x[:-1]]
+    if c=='?':
+        return '?'
+    if c=='f':
+        c='xxxfxxx'
+    if c=='c':
+        c='xxxcxxx'
+    if c!=None and len(c)!=1 and len(c)!=7:
+        print('ERROR: illegal bone class ', c, x)
+    if c==None:
+        return c
+    if comp=='offset':
+        return c[:3]
+    elif comp=='rotation':
+        return c[3]
+    elif comp=='scale':
+        return c[4:]
+    else:
+        print('Invalid bone class component ', comp, 'requested')
+        return None
+
+def recompose(v):
+        T = Matrix.Translation(v[0])
+        R = v[1].to_matrix().to_4x4()
+        S = Matrix.Diagonal(v[2].to_4d())            
+        return T @ R @ S
+
+# flags: 1 - FK, 2 - soft, 3 - everything
+def load_pose(a, fn, flags=3):
+    #global deformed_rig
+    arm = bpy.data.objects[a]
+    if arm["default_rig"]==None:
+        print('Operation unsupported on a fallback-mode rig')
+        return    
+    default_rig=arm["default_rig"]
+    deformed_rig=arm["deformed_rig"]
+    bpy.ops.object.mode_set(mode='OBJECT')    
+    bpy.context.view_layer.objects.active = arm
+    bpy.ops.object.mode_set(mode='POSE')
+    idx_map={'offset':0,'rotation':1,'scale':2}
+    f=open(fn, "r").readlines()
+    if 'UnityEngine' in f[0]:
+        _, v=load_unity_dump(fn)
+        for x in v:
+            if x in default_rig \
+            and x in arm.pose.bones \
+            and arm.pose.bones[x].parent!=None \
+            and arm.pose.bones[x].parent.name in default_rig:
+                default_delta = Matrix(default_rig[arm.pose.bones[x].parent.name]).inverted() @ Matrix(default_rig[x])
+                v[x] = default_delta.inverted() @ v[x]                
+        f={}
+        for x in v:
+            y=v[x].decompose()
+            f[(x,'offset')]=y[0]
+            f[(x,'rotation')]=y[1]
+            f[(x,'scale')]=y[2]
+    else:
+        f=[x.strip().split() for x in f]
+        f={(x[0],x[1]): [float(y) for y in x[2:]] for x in f}
+
+    null_pose=(Vector(), Quaternion(), Vector([1,1,1]))
+    ch=('offset','rotation','scale')
+    for x in arm.pose.bones.keys():
+        pose = list(arm.pose.bones[x].matrix_basis.decompose())
+        for y in range(3):
+            if (x,ch[y]) in f:
+                op = f[(x,ch[y])]
+            else:
+                op = null_pose[y]               
+            c=bone_class(x, ch[y])
+            for n in range(len(op)):
+                if (c=='?') or (c==None) \
+                    or ((flags&1) and c[n if y!=1 else 0] in ('f',)) \
+                    or ((flags&2) and c[n if y!=1 else 0] in ('s','i','u')):
+                        pose[y][n]=op[n]
+        arm.pose.bones[x].matrix_basis=recompose(pose)
+        if flags & 2:
+            # todo: ideally, deformed_rig should exclude FK bones (but that's too much work) 
+            deformed_rig[x]=arm.pose.bones[x].matrix_basis.copy()
+                        
+def dump_pose(a, of, x='cf_J_Root'):
+    arm = bpy.data.objects[a]
+    b = arm.data.bones[x]
+    bpy.context.object.data.bones.active = b
+    local = arm.pose.bones[x].matrix_basis
+    local = snap(local.decompose())
+    changes=[0,0,0, 0,0,0,0]
+    for n in range(3):
+        if local[0][n]!=0:
+            changes[n]=1
+        if abs(local[0][n])>=0.010:
+            changes[n]=2
+        if local[1][1+n]!=0:
+            changes[3]|=1
+        if abs(local[1][1+n])>=0.010:
+            changes[3]|=2
+        if local[2][n]!=1:
+            changes[n+4]=1
+        if abs(local[2][n]-1)>=0.010:
+            changes[n+4]=2
+    comp_name=('offset','rotation','scale')
+    for comp in range(3):
+        c = bone_class(x, comp_name[comp])
+        if comp==0:
+            def_trans=Vector() 
+        elif comp==1:
+            def_trans=Quaternion()
+        else:
+            def_trans=Vector([1,1,1])
+        if comp==1:
+            changes=changes[3:]
+        if comp==2:
+            changes=changes[1:]
+        if c==None and local[comp]!=def_trans:
+            print('Nontrivial ', comp_name[comp], ' in unclassified bone ', x)
+        elif c!='?' and c!=None:
+            for n in range(1 if comp==1 else 3):
+                if (c[n]=='x' and changes[n]!=0) or (c=='i' and (changes[n] & 2)):
+                    print('Violated', comp_name[comp], 'constraint', n, 'in bone ', x)
+    if local[0]!=Vector():
+        s=x+' offset %.4f %.4f %.4f\n' % (local[0][0], local[0][1], local[0][2])
+        of.write(s)        
+    if local[1]!=Quaternion():
+        s=x+' rotation %.4f %.4f %.4f %.4f\n' % (local[1][0], local[1][1], local[1][2], local[1][3])
+        of.write(s)        
+    if local[2]!=Vector([1,1,1]):
+        s=x+' scale %.4f %.4f %.4f\n' % (local[2][0], local[2][1], local[2][2])
+        of.write(s)        
+#        s = x+('basis %f %f %f %f  %f %f %f %f  %f %f %f %f  %f %f %f %f\n' % (local[0][0], local[0][1], local[0][2], local[0][3],
+#            local[1][0], local[1][1], local[1][2], local[1][3],
+#            local[2][0], local[2][1], local[2][2], local[2][3],
+#            local[3][0], local[3][1], local[3][2], local[3][3]))
+    for x in b.children.keys():
+        dump_pose(a, of, x)
 
 bone_transforms={}
 def reshape_mesh_one_bone(x, arm, dic=None):        
@@ -707,9 +867,7 @@ def reshape_mesh_one_bone(x, arm, dic=None):
         local = arm.data.bones[x].matrix_local
         mw = matrix_world(arm, x)
         target = Matrix(dic[x])
-        bpy.context.active_pose_bone.matrix_basis = bpy.context.active_pose_bone.matrix_basis @ mw.inverted() @ target
-        bone_transforms[x]=bpy.context.active_pose_bone.matrix_basis @ mw.inverted() @ target
-        local=bone_transforms[x]
+        arm.pose.bones[x].matrix_basis = arm.pose.bones[x].matrix_basis @ mw.inverted() @ target
     for x in b.children.keys():
         reshape_mesh_one_bone(x, arm, dic)
 
@@ -720,7 +878,6 @@ def reset_pose_one_bone(x, ob):
         bpy.context.active_pose_bone.matrix_basis = Matrix()
     for x in b.children.keys():
         reset_pose_one_bone(x, ob)
-
 
 def read_rigfile_from_textblock(x):
     txt=bpy.data.texts[x].lines
@@ -758,6 +915,14 @@ def score_deform(b, depsgraph, undeformed):
     errors=[bm.verts[x].co - undeformed[x].co for x in range(n)]
     bm.free()
     return errors
+
+
+def find_nearest(mesh, v, cands):
+    a=cands[0]
+    for x in cands:
+        if (mesh.vertices[x].co-v).length<(mesh.vertices[a].co-v).length:
+            a=x
+    return a
     
 # Given an object 'b' that is parented to an armature in a nontrivial pose, and a reference
 # object with the same number of vertices, deforms the rest position of 'b' until it matches 'b2' in pose position.
@@ -808,127 +973,107 @@ def solve_for_deform(b, b2, shape_key=None, counter=None, scale=Vector([1,1,1]))
         target=b.data.vertices
         undeformed=b2.data.vertices
     n = len(target)
-    errors = score_deform(b, depsgraph, undeformed)
-    dirs=errors[:]
-    steps=[intl_step]*n
-    age=[0]*n
-    residual=sum([x.length for x in errors])
-    print('Initial residual vertex error ', residual/n)
-    last_max_residual_pos=-1
-    frozen=[(1 if x.length<0.0001 else 0) for x in errors]
-    last_max_residual=0.0
-    solved=frozen[:]
-    live=n-sum(frozen)
-    for p in range(160 if baseline else 20):
-        vsave = [target[x].co.copy() for x in range(n)]
-        for x in range(n):
-            if frozen[x]:
-                continue
-            #if age[x]>=2:
-        for x in range(n):
-            if frozen[x]:
-                continue
-            target[x].co=vsave[x]+dirs[x]*steps[x]*(-1 if (age[x]==0) else 1)
-        errors2 = score_deform(b, depsgraph, undeformed)
-        moved=0
-        mean_step=0
-        max_residual=0.0
-        max_residual_pos=-1
-        for x in range(n):
-            if frozen[x]:
-                continue
-            if errors2[x].length<errors[x].length:
-                delta=errors[x]-errors2[x]
-                delta/=delta.length
-                delta*=errors[x].length
-                cos_phi=delta.dot(errors[x])/(errors[x].length*delta.length)
-                dirs[x]=errors2[x]-0.5*delta*(1.0-cos_phi)
-                mean_step+=steps[x]
-                if steps[x]<1.3:
-                    steps[x]*=1.25
-                errors[x]=errors2[x]
-                age[x]=0
-                moved+=1
-                if errors[x].length<0.0001:
-                    frozen[x]=1
-                    solved[x]=1
-                    live-=1
-            else:
-                target[x].co=vsave[x]
-                age[x]+=1
-                if steps[x]>0.01:
-                    steps[x]/=2
-                else:
-                    dirs[x]=Vector([dirs[x][1]*math.sin(p),dirs[x][2]*math.cos(p),dirs[x][0]])
-                    steps[x]=intl_step
-                    if age[x]>=5:
-                        frozen[x]=1
-                        live-=1
-            if errors[x].length>max_residual:
-                max_residual=errors[x].length
-                max_residual_pos=x
-        last_residual = residual
-        last_max_residual = max_residual
-        last_max_residual_pos = max_residual_pos
+    for attempt in range(2 if baseline else 1):
+        errors = score_deform(b, depsgraph, undeformed)
+        frozen=[(1 if x.length<0.0001 else 0) for x in errors]
+        if attempt==1:
+            # if we didn't get everything first time, try again but using solved vertexes as hints
+            for x in range(len(errors)):
+                if not frozen[x]:
+                    nearest=None
+                    for y in range(len(errors)):
+                        if frozen[y] and (nearest==None or (undeformed[y].co-undeformed[x].co).length < (undeformed[nearest].co-undeformed[x].co).length):
+                            nearest=y
+                    target[x].co=target[nearest].co + (undeformed[x].co-undeformed[nearest].co)
+            errors = score_deform(b, depsgraph, undeformed)
+        dirs=errors[:]
+        steps=[intl_step]*n
+        age=[0]*n
         residual=sum([x.length for x in errors])
-        print("Pass ", p, ": residual vertex error %.6f %.6f, %.6f moved, " % (residual/n, max_residual, float(moved)/n), 
-            'mean step %.3f' % (mean_step/max(moved,1)), ', ', live, 'live')
-        npass+=1
-        if max_residual<0.0001 or live==0:
-            break  
-    print(sum(solved), "/", n, " vertices solved")
+        print('Initial residual vertex error ', residual/n)
+        last_max_residual_pos=-1
+        last_max_residual=0.0
+        solved=frozen[:]
+        live=n-sum(frozen)
+        for p in range(160 if baseline else 20):
+            vsave = [target[x].co.copy() for x in range(n)]
+            for x in range(n):
+                if frozen[x]:
+                    continue
+                #if age[x]>=2:
+            for x in range(n):
+                if frozen[x]:
+                    continue
+                target[x].co=vsave[x]+dirs[x]*steps[x]*(-1 if (age[x]==0) else 1)
+            errors2 = score_deform(b, depsgraph, undeformed)
+            moved=0
+            mean_step=0
+            max_residual=0.0
+            max_residual_pos=-1
+            for x in range(n):
+                if frozen[x]:
+                    continue
+                if errors2[x].length<errors[x].length:
+                    delta=errors[x]-errors2[x]
+                    delta/=delta.length
+                    delta*=errors[x].length
+                    cos_phi=delta.dot(errors[x])/(errors[x].length*delta.length)
+                    beta=-0.5
+                    if live<0.05*n:
+                        beta = 0.25*((p%5)-2)
+                    dirs[x]=errors2[x]+beta*delta*(1.0-cos_phi)
+                    mean_step+=steps[x]
+                    if steps[x]<1.3:
+                        steps[x]*=1.25
+                    errors[x]=errors2[x]
+                    age[x]=0
+                    moved+=1
+                    if errors[x].length<0.0001:
+                        frozen[x]=1
+                        solved[x]=1
+                        live-=1
+                else:
+                    age[x]+=1
+                    if steps[x]>0.01:
+                        target[x].co=vsave[x]
+                        steps[x]/=2
+                    else:
+                        if age[x]<10:
+                            target[x].co=vsave[x]
+                            dirs[x]=Vector([dirs[x][1]*math.sin(p),dirs[x][2]*math.cos(p),dirs[x][0]])
+                            steps[x]=intl_step
+                        else:
+                            # move anyway
+                            age[x]=0
+                            errors[x]=errors2[x]
+                            #frozen[x]=1
+                            #live-=1
+                if errors[x].length>max_residual:
+                    max_residual=errors[x].length
+                    max_residual_pos=x
+            last_residual = residual
+            last_max_residual = max_residual
+            last_max_residual_pos = max_residual_pos
+            residual=sum([x.length for x in errors])
+            print("Pass ", p, ": residual vertex error %.6f %.6f, %.6f moved, " % (residual/n, max_residual, float(moved)/n), 
+                'mean step %.3f' % (mean_step/max(moved,1)), ', ', live, 'live')
+            npass+=1
+            if max_residual<0.0001 or live==0:
+                break  
+        print(sum(solved), "/", n, " vertices solved")
+        if sum(solved) in (0, n):
+            break
     return npass, n-sum(solved)
 
-deformed_rig={}
+# todo: fallback mode for custom meshes
 
-def reshape_armature(): 
-    global deformed_rig
-    arm = bpy.data.objects['Armature']
-    body = bpy.data.objects['body']
-    bpy.ops.object.mode_set(mode='OBJECT')    
+
+def prettify_armature(arm):
+    #arm = bpy.data.objects['Armature']
+    #arm = bpy.context.view_layer.objects.active
+    bpy.ops.object.mode_set(mode='OBJECT')  
     bpy.context.view_layer.objects.active = arm
-    bpy.ops.object.mode_set(mode='EDIT')
-    
-    default_rig = read_rigfile_from_textblock('Rig_Male' if boy else 'Rig_Female')
-    default_rig_head=read_rigfile_from_textblock('Rig_Male_Head' if boy else ('Rig_Female_Head1' if 'p_cf_head_01' in arm.data.edit_bones else 'Rig_Female_Head0'))
-    for x in default_rig_head:
-        m=default_rig_head[x]
-        m[1][3]+=15.935
-        m[2][3]+=-0.23
-        default_rig[x]=m
-        
-    bpy.ops.object.mode_set(mode='EDIT')    
-    char_offsets={}
-    for x in arm.data.edit_bones:
-        if x.name in bone_pos and x.parent and x.parent.name in bone_pos \
-            and (x.name in default_rig) and (x.parent.name in default_rig):
-            cur_offset=x.matrix.decompose()[0]-x.parent.matrix.decompose()[0]
-            ref_offset=default_rig[x.name].decompose()[0]-default_rig[x.parent.name].decompose()[0]
-            delta_offset=cur_offset-ref_offset
-            if len(delta_offset)>0.005:
-                print(x.name, delta_offset)
-            char_offsets[x.name]=delta_offset        
-
-    def apply_offsets_bone(x):
-        o = Vector()
-        y = x
-        if x.name in default_rig:
-            x.matrix=default_rig[x.name]
-        """
-        while y!=None:
-            if y.name in char_offsets:
-                o += char_offsets[y.name]
-            y=y.parent
-        x.matrix[0][3]-=o[0]
-        x.matrix[1][3]-=o[1]
-        x.matrix[2][3]-=o[2]
-        """
-        for y in x.children:
-            apply_offsets_bone(y)
-                        
-    apply_offsets_bone(arm.data.edit_bones['cf_J_Root'])
-
-    cs=char_shape()
+    bpy.ops.object.mode_set(mode='EDIT')  
     """
     BONE LAYERS
     General principles:
@@ -958,71 +1103,6 @@ def reshape_armature():
     22: torso soft
     28: face soft
     """
-
-    loaded=cs.deserialize()
-    print('Load attempt: ', loaded)
-
-    # Set the rest position of 'arm' to "custom body" state
-    bpy.context.view_layer.objects.active = arm
-    bpy.ops.object.mode_set(mode='EDIT')    
-
-    body_parts=arm.children 
-
-    # duplicate body
-    bpy.ops.object.mode_set(mode='OBJECT')  
-    for x in body_parts:
-        bpy.ops.object.select_all(action='DESELECT')    
-        x.select_set(True)
-        bpy.context.view_layer.objects.active = x
-        bpy.ops.object.duplicate()
-        dup = bpy.context.object
-        x["ref"] = dup.name
-
-        # unparent duplicate from the rig
-        bpy.ops.object.select_all(action='DESELECT')
-        dup.select_set(True)
-        bpy.context.view_layer.objects.active = dup
-        bpy.ops.object.parent_clear(type='CLEAR')  
-
-    """
-    # Set the rest position of 'arm' to "default body" state
-    bpy.context.view_layer.objects.active = arm
-    bpy.ops.object.mode_set(mode='POSE')    
-    reset_pose_one_bone('cf_J_Root', arm)
-    bpy.ops.object.mode_set(mode='EDIT')    
-    for x in bpy.context.object.data.edit_bones:
-        if x.name=='cf_J_FaceBase':
-            print(x.name in bone_pos, x.name in default_rig)
-        if x.name in bone_pos and x.name in default_rig:
-            x.matrix=default_rig[x.name]
-    """
-     # Stretch 'arm' back to 'custom body' 
-    bpy.context.view_layer.objects.active = arm
-    bpy.ops.object.mode_set(mode='POSE')    
-    reshape_mesh_one_bone('cf_J_Root', arm)
-    for x in arm.pose.bones:
-        deformed_rig[x.name]=x.matrix_basis.copy()
-    
-    bpy.ops.object.mode_set(mode='OBJECT')  
-    npass=0
-    fail_vert=0
-
-    # Solve for undeformed mesh shape
-    for b in body_parts:
-        b2 = bpy.data.objects[b["ref"]]
-        x, y = solve_for_deform(b, b2)
-        npass += x
-        fail_vert += y
-
-    print("Done in ", npass, " passes, ", fail_vert, "failed vertices")
-    bpy.ops.object.select_all(action='DESELECT')
-    for x in body_parts:
-        bpy.data.objects[x["ref"]].select_set(True)
-    bpy.ops.object.delete(use_global=False)
-
-    bpy.ops.object.mode_set(mode='OBJECT')  
-    bpy.context.view_layer.objects.active = arm
-    bpy.ops.object.mode_set(mode='EDIT')  
     for x in bpy.context.object.data.edit_bones:
         array=[False]*32
         array[15] = True
@@ -1089,8 +1169,8 @@ def reshape_armature():
         # It would be nice to have all bones correctly oriented, but replacing either tail or roll replaces the matrix we just uploaded, 
         # and redefines the axes. Which, in turn, messes with bone constraints. Let's just leave everything pointing up.
 
-    if not loaded:
-        cs.serialize()
+    #if not loaded:
+    #    cs.serialize()
 
     bpy.ops.object.mode_set(mode='POSE')
     
@@ -1172,6 +1252,317 @@ def reshape_armature():
     arm.data.display_type = 'STICK'
     arm.data.layers=[True,True,True,True] + [False]*28
     arm.show_in_front = True
+    
+
+def reshape_armature_fallback(): 
+    #arm = bpy.data.objects['Armature']
+    arm = bpy.context.view_layer.objects.active
+    body = bpy.data.objects['body']
+    arm["default_rig"]=None
+    
+    bone_pos, _ = load_unity_dump(dumpfilename)
+    if bone_pos==None:
+        print("Failed to load the unity dump, aborting")
+        return
+    #print(bone_pos)
+    bpy.ops.object.mode_set(mode='OBJECT')    
+    bpy.context.view_layer.objects.active = arm
+    bpy.ops.object.mode_set(mode='EDIT')
+    def apply_offsets_bone(x, bone_pos):
+        if x.name in bone_pos:
+            x.matrix=bone_pos[x.name]
+        for y in x.children:
+            apply_offsets_bone(y, bone_pos)
+    apply_offsets_bone(arm.data.edit_bones['cf_J_Root'], bone_pos)
+    prettify_armature(arm)
+
+def to_int(v):
+    return (int(v.co[0]*100000.), int(v.co[1]*100000.), int(v.co[2]*100000.))
+
+def from_int(v):
+    return Vector([v[0]/100000., v[1]/100000., v[2]/100000.])
+
+def try_load_solution_cache(b):
+    try:
+        f=open(path+"solution.cache","rb")
+    except:
+        return False
+    buf = f.read()
+    f.close()
+    buf=struct.unpack('%si' % (len(buf)//4), buf)
+    map={}
+    for x in range(len(buf)//6):
+        v1=(buf[x*6],buf[x*6+1],buf[x*6+2])
+        v2=from_int(buf[x*6+3:x*6+6])
+        map[v1]=v2
+
+    solved=0
+    unsolved=0
+    for x in b:
+        if x.data.shape_keys!=None:
+            for k in x.data.shape_keys.key_blocks.keys():                
+                source=bpy.data.objects[x["ref"]].data.shape_keys.key_blocks[k].data
+                target=x.data.shape_keys.key_blocks[k].data
+                for y in range(len(source)):
+                    v=to_int(source[y])
+                    if v in map:
+                        target[y].co=map[v]
+                        solved+=1
+                    else:
+                        unsolved+=1
+        else:
+            source = bpy.data.objects[x["ref"]].data.vertices
+            target = x.data.vertices
+            for y in range(len(source)):
+                v=to_int(source[y])
+                if v in map:
+                    target[y].co=map[v]
+                    solved+=1
+                else:
+                    unsolved+=1
+    print("Loaded ", solved, "of", solved+unsolved, "vertex coordinates from cache")
+    return unsolved==0
+
+def save_solution_cache_one_obj(v, of):
+    for x in v:
+        s='%.6f %.6f %.6f\n' % (x.co[0], x.co[1], x.co[2])
+        of.write(s)
+
+def save_solution_cache(b):
+    of=open(path+"solution.cache","wb")
+    map={}
+    for x in b:
+        #n=b.name.split('.')[0]
+        if x.data.shape_keys!=None:
+            for k in x.data.shape_keys.key_blocks.keys():
+                source=bpy.data.objects[x["ref"]].data.shape_keys.key_blocks[k].data
+                target=x.data.shape_keys.key_blocks[k].data
+                for y in range(len(source)):
+                    v1=to_int(source[y])
+                    v2=to_int(target[y])
+                    map[v1]=v2
+        else:
+            source = bpy.data.objects[x["ref"]].data.vertices
+            target = x.data.vertices
+            for y in range(len(source)):
+                v1=to_int(source[y])
+                v2=to_int(target[y])
+                map[v1]=v2
+            #of.write(x.name+'\t'+str(len(x.data.vertices))+'\n')
+            #save_solution_cache_one_obj(x.data.vertices, of)
+    vf=[]
+    for x in map:
+        vf.extend([x[0],x[1],x[2],map[x][0],map[x][1],map[x][2]])
+    buf = struct.pack('%si' % len(vf), *vf)
+    of.write(buf)
+    of.close()
+
+
+def reshape_armature(arm, body): 
+    #global deformed_rig
+    #    arm = bpy.data.objects['Armature']
+    boy = body['Boy']>0.0        
+    bpy.ops.object.mode_set(mode='OBJECT')    
+    #bpy.context.view_layer.objects.active = arm
+    bpy.ops.object.mode_set(mode='EDIT')
+    
+    # custom head mesh
+    if not 'cf_J_CheekLow_L' in arm.data.edit_bones:
+        print("Custom head mesh suspected, taking the fallback route");
+        return reshape_armature_fallback()
+
+    default_rig = read_rigfile_from_textblock('Rig_Male' if boy else 'Rig_Female')
+    default_rig_head = read_rigfile_from_textblock('Rig_Male_Head' if boy else ('Rig_Female_Head1' if 'cf_J_pupil_s_R' in arm.data.edit_bones else 'Rig_Female_Head0'))
+    for x in default_rig_head:
+        m=default_rig_head[x]
+        m[1][3]+=15.935
+        m[2][3]+=-0.23
+        default_rig[x]=m
+        
+    for x in arm.data.edit_bones:
+        if not x.name in default_rig:
+            #print(x.name, x.matrix)
+            default_rig[x.name] = x.matrix
+    #bpy.ops.object.mode_set(mode='EDIT')    
+
+    # By default, cf_J_Hips is connected to cf_N_Height, but neither Spine01 nor Kosi01 are connected to cf_J_Hips 
+    # (and therefore they use the same local transform matrix).
+    arm.data.edit_bones['cf_J_Hips'].use_connect=False
+    hips_position = (arm.data.edit_bones['cf_J_Spine01'].matrix.decompose()[0] + arm.data.edit_bones['cf_J_Kosi01'].matrix.decompose()[0])*0.5
+    def apply_offsets_bone(x):
+        o = Vector()
+        y = x
+        if x.name in default_rig:
+            x.matrix=default_rig[x.name]
+        for y in x.children:
+            apply_offsets_bone(y)
+                        
+    apply_offsets_bone(arm.data.edit_bones['cf_J_Root'])
+
+    # Set the rest position of 'arm' to "custom body" state
+    bpy.context.view_layer.objects.active = arm
+    bpy.ops.object.mode_set(mode='EDIT')    
+
+    body_parts=arm.children 
+
+    # duplicate each item 
+    bpy.ops.object.mode_set(mode='OBJECT')  
+    for x in body_parts:
+        bpy.ops.object.select_all(action='DESELECT')    
+        x.select_set(True)
+        bpy.context.view_layer.objects.active = x
+        bpy.ops.object.duplicate()
+        dup = bpy.context.object
+        x["ref"] = dup.name
+
+        # unparent duplicate from the rig
+        bpy.ops.object.select_all(action='DESELECT')
+        dup.select_set(True)
+        bpy.context.view_layer.objects.active = dup
+        bpy.ops.object.parent_clear(type='CLEAR')  
+
+
+    bone_pos, _ = load_unity_dump(dumpfilename)
+    if bone_pos==None:
+        print("Failed to load the unity dump, aborting")
+        return
+
+     # Stretch 'arm' back to 'custom body' 
+    bpy.context.view_layer.objects.active = arm
+    bpy.ops.object.mode_set(mode='POSE')    
+    reshape_mesh_one_bone('cf_J_Root', arm, bone_pos)
+    deformed_rig={}
+    for x in arm.pose.bones:
+        deformed_rig[x.name]=x.matrix_basis.copy()
+
+    arm["default_rig"]=default_rig
+    arm["deformed_rig"]=deformed_rig
+    #of=open("c:\\temp\\pose_" + name + ".txt","w")
+    #dump_pose('cf_J_Root', 'Armature', of)
+    #of.close()
+
+    bpy.ops.object.mode_set(mode='OBJECT')  
+    npass=0
+    fail_vert=0
+
+    if not try_load_solution_cache(body_parts):
+        # Solve for undeformed mesh shape
+        for b in body_parts:
+            b2 = bpy.data.objects[b["ref"]]
+            x, y = solve_for_deform(b, b2)
+            npass += x
+            fail_vert += y
+        print("Done in ", npass, " passes, ", fail_vert, "failed vertices")
+        save_solution_cache(body_parts)
+    bpy.ops.object.select_all(action='DESELECT')
+    for x in body_parts:
+        bpy.data.objects[x["ref"]].select_set(True)
+    bpy.ops.object.delete(use_global=False)
+    prettify_armature(arm)
+
+
+def vgroup(obj, name):
+    id=obj.vertex_groups[name].index
+    return [x for x in range(len(obj.data.vertices)) if id in [g.group for g in obj.data.vertices[x].groups]]
+
+def vgroup2(obj, name1, name2):
+    id1=obj.vertex_groups[name1].index
+    id2=obj.vertex_groups[name2].index
+    v=[x for x in range(len(obj.data.vertices)) if id1 in [g.group for g in obj.data.vertices[x].groups]]
+    return [x for x in v if id2 in [g.group for g in obj.data.vertices[x].groups]]
+
+def weighted_center(name):
+    id=bpy.context.active_object.vertex_groups[name].index
+    mesh=bpy.context.active_object.data
+    vs=vgroup(bpy.context.active_object, name)
+    s=Vector()
+    wt=0.0
+    for x in vs:
+        for y in mesh.vertices[x].groups:
+            if y.group==id:
+                s+=mesh.vertices[x].co*y.weight
+                wt+=y.weight
+    return s*(1.0/wt)
+
+def fix_mouth(obj):
+    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.context.view_layer.objects.active = obj
+    mesh=obj.data
+    if not 'cf_J_CheekLow_L' in bpy.context.active_object.vertex_groups: # custom head
+        return 
+
+    cheek=vgroup(obj, 'cf_J_CheekLow_L')
+    mcands=vgroup2(obj, 'cf_J_MouthLow', 'cf_J_Mouthup')
+    if len(mcands)==0:
+        print("Can't do mouth blendshape on this character")
+        return
+    mcorn=weighted_center('cf_J_Mouth_L')
+
+    mcorn_nearest=find_nearest(mesh, mcorn, mcands)
+    cheek_nearest=find_nearest(mesh, mcorn, cheek)
+    mcorn = (mesh.vertices[mcorn_nearest].co + mesh.vertices[cheek_nearest].co)*0.5
+    mcorn_nearest = find_nearest(mesh, mcorn, mcands)
+    mcorn = mesh.vertices[mcorn_nearest].co
+    #mesh.vertices[mcorn_nearest].co[2]+=1
+    mcent=mcorn.copy()
+    mcent[0]=0
+    ccent=weighted_center('cf_J_CheekLow_L')
+    ccorn=mcorn + (ccent-mcorn)*2.0
+    ccorn_nearest=mesh.vertices[0].co
+    for x in mesh.vertices:
+        if (x.co-ccorn).length<(ccorn_nearest-ccorn).length:
+            ccorn_nearest=x.co
+    ccorn=ccorn_nearest
+    print(ccorn)
+    ccent=(ccorn+mcorn)*0.5
+    vmc=ccent-mcorn
+    yneg_cutoff=-(mcent-mcorn).dot(vmc)/(vmc.length*vmc.length)
+
+    sk = obj.shape_key_add(name='better_smile')
+    sk.interpolation='KEY_LINEAR'
+    
+    for side in range(2):
+        if side==1:
+            mcorn[0]*=-1
+            ccorn[0]*=-1
+        ccent=(mcorn+ccorn)*0.5
+        vmc=ccent-mcorn
+        vmm=mcorn-mcent
+        normal=Vector([vmc[2], 0, -vmc[0]])
+        normal2=vmc.cross(normal)
+        normal2/=normal2.length
+        if normal[2]<0:
+            normal*=-1.0
+        mod=[x for x in range(len(mesh.vertices)) if (mesh.vertices[x].co-ccent).length<1.5*vmc.length or (mesh.vertices[x].co-mcorn).length<1.5*vmm.length]
+        deform=0.2
+
+        for x in mod:
+            v = obj.data.vertices[x] #bm.verts[x]
+            y=(v.co-mcorn).dot(vmc)/(vmc.length*vmc.length)
+            if y<0:
+                y/=yneg_cutoff
+            z=(v.co-mcorn).dot(normal2)/vmc.length
+            #z*=(1.0 if y<0 else max(1.0, 2.0-y))
+            #z*=2
+            if abs(z)>=1.0:
+                z=0.0
+            else:
+                z=0.5*(1.0+math.cos(math.pi*z))
+            #  we pull the vertex toward the ear, maximal effect at lip corner and smoothly decaying 
+            #  until we hit 0 at lip center or cheek center.
+            #  for positive y (cheek), we also displace the vertex away from the face,
+            # trying to create a 'bulge' right next to the lip corner.
+            #   Can be improved with a better mathematical model (removing all the ad hoc constants)
+            # but seems to work okay as is.
+            sk.data[x].co+=vmc*max(0.0, 1.0-abs(y))*deform*z
+            if y>0:
+                tslope = 3.0
+                if y<0.0 or y>2.0:
+                    tfun=0.0
+                else:
+                    tfun = tslope*y*(0.25*y*y-y+1.0)
+                sk.data[x].co+=normal*tfun*deform*z
+
 
 class hs2rig_props(PropertyGroup):
     finger_curl_scale: FloatProperty(
@@ -1182,10 +1573,14 @@ class hs2rig_props(PropertyGroup):
     custom_geo: FloatProperty(
         name="Body customization", min=0, max=2,
         default=1, precision=2,
-        description="Custom geometry"
+        description="Morphs between default body shape and character specific body shape"
+    )
+    file_path: StringProperty(
+        name="File path", 
+        default='c:\\temp\\pose.txt', 
+        description="File path"
     )
     def execute(self, context):
-        print('hs2rig_props ', custom_geo, finger_curl_scale)
         return {'FINISHED'}
     
 
@@ -1198,8 +1593,6 @@ class hs2rig_posing_base(Operator):
         ('cf_J_LegLow01_L', 90, 0, 0), 
         ('cf_J_ArmUp00_L', 0, 0, -75, -1),
         ('cf_J_ArmLow01_L', 10, 0, 0),
-        ('cf_J_Foot01_L', 0, 0, 0),
-        ('cf_J_Foot02_L', 0, 0, 0),
         ],
     'kneel':[('cf_J_LegUp00_L', -30, 0, 45, -1), 
         ('cf_J_LegLow01_L', 120, 0, 0), 
@@ -1208,27 +1601,23 @@ class hs2rig_posing_base(Operator):
         ('cf_J_Foot01_L', 20, 0, 0),
         ('cf_J_Foot02_L', 40, 0, 0),
         ],
-    'T':[('cf_J_LegUp00_L', 0, 0, 0), 
-        ('cf_J_LegLow01_L', 0, 0, 0), 
-        ('cf_J_ArmUp00_L', 0, 0, 0, -1),
-        ('cf_J_ArmLow01_L', 00, 0, 0),
-        ('cf_J_Foot01_L', 0, 0, 0),
-        ('cf_J_Foot02_L', 0, 0, 0),
-        ],
+    'T':[],
     'A':[('cf_J_LegUp00_L', 0, 0, 20, -1), 
-        ('cf_J_LegLow01_L', 0, 0, 0), 
         ('cf_J_ArmUp00_L', 0, 0, -60, -1),
-        ('cf_J_ArmLow01_L', 00, 0, 0),
-        ('cf_J_Foot01_L', 0, 0, 0),
-        ('cf_J_Foot02_L', 0, 0, 0),
         ],
     }
 
     def set_pose(self, context, pose):
         #print("Executing! Finger curl is ", context.scene.hs2rig_data.finger_curl_scale)
-        arm = bpy.data.objects['Armature']
+        #arm = bpy.data.objects['Armature']
+        arm = context.active_object
         v=hs2rig_posing_base.poses[pose]+self.finger_curl(0.0 if pose=='T' else context.scene.hs2rig_data.finger_curl_scale)
-        print(v)
+        #print(v)
+        # todo: clear all bones
+        deformed_rig = arm["deformed_rig"]
+        for x in arm.pose.bones:
+            if x.name in deformed_rig:
+                x.matrix_basis=deformed_rig[x.name])
         for x in v:
             arm.pose.bones[x[0]].rotation_mode='YZX'
             arm.pose.bones[x[0]].rotation_euler=Euler((x[1]*math.pi/180., x[2]*math.pi/180., x[3]*math.pi/180.), 'YZX')
@@ -1237,8 +1626,45 @@ class hs2rig_posing_base(Operator):
             arm.pose.bones[x[0][:-1]+'R'].rotation_euler=Euler((x[1]*math.pi/180., mult*x[2]*math.pi/180., mult*x[3]*math.pi/180.), 'YZX')
         return {'FINISHED'}
 
+class hs2rig_OT_load_fk(Operator):
+    bl_idname = "object.load_pose_fk"
+    bl_label = "Load pose"
+    bl_description = "Loads the character pose from the file"
+    bl_options = {'REGISTER', 'UNDO'}
+    def execute(self, context):
+        load_pose(context.active_object.name, context.scene.hs2rig_data.file_path, 1)
+        return {'FINISHED'}
 
-class hs2rig_posing(hs2rig_posing_base):
+class hs2rig_OT_load_shape(Operator):
+    bl_idname = "object.load_pose_soft"
+    bl_label = "Load shape"
+    bl_description = "Loads the character shape from the file"
+    bl_options = {'REGISTER', 'UNDO'}
+    def execute(self, context):
+        load_pose(context.active_object.name, context.scene.hs2rig_data.file_path, 2)
+        return {'FINISHED'}
+
+class hs2rig_OT_load_all(Operator):
+    bl_idname = "object.load_pose_all"
+    bl_label = "Load all"
+    bl_description = "Loads the character pose and shape from the file"
+    bl_options = {'REGISTER', 'UNDO'}
+    def execute(self, context):
+        load_pose(context.active_object.name, context.scene.hs2rig_data.file_path, 3)
+        return {'FINISHED'}
+
+class hs2rig_OT_save_all(Operator):
+    bl_idname = "object.save_pose_all"
+    bl_label = "Save all"
+    bl_description = "Saves the character pose and shape to the file"
+    bl_options = {'REGISTER', 'UNDO'}
+    def execute(self, context):
+        of=open(context.scene.hs2rig_data.file_path,"w")
+        dump_pose(context.active_object.name, of)
+        of.close()
+        return {'FINISHED'}
+
+class hs2rig_OT_posing(hs2rig_posing_base):
     bl_idname = "object.set_pose"
     bl_label = "Sit"
     bl_description = "Set selected pose"
@@ -1247,7 +1673,7 @@ class hs2rig_posing(hs2rig_posing_base):
     def execute(self, context):
         return self.set_pose(context, 'sit')
 
-class hs2rig_posing2(hs2rig_posing_base):
+class hs2rig_OT_posing2(hs2rig_posing_base):
     bl_idname = "object.set_pose2"
     bl_label = "Kneel"
     bl_description = "Set selected pose"
@@ -1256,7 +1682,7 @@ class hs2rig_posing2(hs2rig_posing_base):
     def execute(self, context):
         return self.set_pose(context, 'kneel')
 
-class hs2rig_posing3(hs2rig_posing_base):
+class hs2rig_OT_posing3(hs2rig_posing_base):
     bl_idname = "object.set_pose3"
     bl_label = "T-pose"
     bl_description = "Set selected pose"
@@ -1265,7 +1691,7 @@ class hs2rig_posing3(hs2rig_posing_base):
     def execute(self, context):
         return self.set_pose(context, 'T')
         
-class hs2rig_posing4(hs2rig_posing_base):
+class hs2rig_OT_posing4(hs2rig_posing_base):
     bl_idname = "object.set_pose4"
     bl_label = "A-pose"
     bl_description = "Set selected pose"
@@ -1274,44 +1700,61 @@ class hs2rig_posing4(hs2rig_posing_base):
     def execute(self, context):
         return self.set_pose(context, 'A')
 
-class hs2rig_clothing(Operator):
+class hs2rig_OT_clothing(Operator):
     bl_idname = "object.toggle_clothing"
     bl_label = "Toggle clothing"
     bl_description = "Set selected scale"
     bl_options = {'REGISTER', 'UNDO'}
     def execute(self, context):
-        for x in bpy.data.objects:
+        for x in context.active_object.children:
             if x.type=='ARMATURE' or x.type=='LIGHT':
                 continue
             if 'Prefab ' in x.name:
                 continue
             if 'hair' in x.name:
                 continue
-            if x.name in ['o_tang', 'o_tooth', 'body', 'Material Cube']:
+            if x.name.startswith('o_tang'):
+                continue
+            if x.name.startswith('o_tooth'):
+                continue
+            if x.name.startswith('o_body'):
                 continue
             x.hide_viewport = not x.hide_viewport
         return {'FINISHED'}
 
 
-class hs2rig_scale(Operator):
+class hs2rig_OT_scale(Operator):
     bl_idname = "object.apply_scale"
     bl_label = "Apply body shape"
     bl_description = "Set selected scale"
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
-        arm = bpy.data.objects['Armature']
+        arm = context.active_object #bpy.data.objects['Armature']
         z=context.scene.hs2rig_data.custom_geo
+        deformed_rig=arm["deformed_rig"]
         #z=self.custom_geo
-        cs=char_shape()
-        loaded=cs.deserialize()
+        #cs=char_shape()
+        #loaded=cs.deserialize()
 
         def scale_one_bone(x):
-            max_deform = deformed_rig[x.name].decompose()
-            offset = max_deform[0]*z
-            scale=Vector([math.pow(max_deform[2][i], z) for i in range(3)])
+            max_deform = Matrix(deformed_rig[x.name]).decompose()
+            offset, rotation, scale = max_deform        
+            bc = bone_class(x.name, 'offset')
+            if bc!='?' and bc!=None:
+                for c in range(3):                    
+                    if bc[c] in ('s','i','u'):
+                        offset[c] = offset[c]*z
+            if bone_class(x.name, 'rotation') in ('s','i','u'):
+                rotation = Quaternion([1,0,0,0])*(1.-z) + rotation*z
+            bc=bone_class(x.name, 'scale')
+            if bc!='?' and bc!=None:
+                for c in range(3):
+                    if bc[c] in ('s','i','u'):
+                        scale[c]=math.pow(scale[c], z)
+            
             T = Matrix.Translation(offset)
-            R = max_deform[1].to_matrix().to_4x4()
+            R = rotation.to_matrix().to_4x4()
             S = Matrix.Diagonal(scale.to_4d())            
             x.matrix_basis=T @ R @ S
             for c in x.children:
@@ -1319,7 +1762,7 @@ class hs2rig_scale(Operator):
         scale_one_bone(arm.pose.bones['cf_J_Root'])
         return {'FINISHED'}
     
-class hs2rig_ui(Panel):
+class hs2rig_PT_ui(Panel):
     bl_idname = "hs2rig_main"
     bl_label = "HS2 rig"
     bl_space_type = "VIEW_3D"
@@ -1331,10 +1774,10 @@ class hs2rig_ui(Panel):
     def draw(self, context):
         layout = self.layout
         scene = context.scene
-        arm = bpy.data.objects['Armature']
+        arm = context.active_object #bpy.data.objects['Armature']
 
         if context.active_object is not None:
-            if context.active_object.type == 'ARMATURE':
+            if context.active_object.type == 'ARMATURE' and arm.get("default_rig")!=None:
                 row = layout.row(align=True)
                 row.operator("object.set_pose")
                 row.operator("object.set_pose2")
@@ -1348,18 +1791,31 @@ class hs2rig_ui(Panel):
                 #row = layout.row(align=True)
                 row.prop(context.scene.hs2rig_data, "custom_geo", slider=True)
                 #row.prop(hs2rig_scale.custom_geo, "custom_geo", slider=True)
+                row = layout.row(align=True)
+                row.prop(context.scene.hs2rig_data, "file_path")
+                row = layout.row(align=True)
+                row.operator("object.load_pose_fk")
+                row.operator("object.load_pose_soft")
+                row.operator("object.load_pose_all")
+                row.operator("object.save_pose_all")
+                #row.operator("object.load_unity")
             else:
                 buf = "No valid object selected"
                 layout.label(text=buf, icon='MESH_DATA')
 
 addon_classes=[
-hs2rig_posing, 
-hs2rig_posing2, 
-hs2rig_posing3, 
-hs2rig_posing4, 
-hs2rig_clothing,
-hs2rig_scale,
-hs2rig_ui, 
+hs2rig_OT_posing, 
+hs2rig_OT_posing2, 
+hs2rig_OT_posing3, 
+hs2rig_OT_posing4, 
+hs2rig_OT_clothing,
+hs2rig_OT_scale,
+
+hs2rig_OT_load_fk,
+hs2rig_OT_load_shape,
+hs2rig_OT_load_all,
+hs2rig_OT_save_all,
+hs2rig_PT_ui, 
 hs2rig_props
 ]
 
@@ -1367,17 +1823,24 @@ for x in addon_classes:
     bpy.utils.register_class(x)    
 bpy.types.Scene.hs2rig_data = PointerProperty(type=hs2rig_props)
 
-if import_bodyparts():
-    rebuild_torso()
-    load_textures()
-    fixup_head()
-    fixup_torso()
-    stitch_head_to_torso()
-    load_unity_dump()
-    reshape_armature()
+success, arm, body = import_bodyparts()
+if success:
+    body=rebuild_torso(arm, body)
+    load_textures(arm, body)
+    fixup_head(body)
+    fixup_torso(body)
+    stitch_head_to_torso(body)
+    arm.name=name
     bpy.ops.object.mode_set(mode='OBJECT')
-    light_data = bpy.data.lights.new('light', type='POINT')
-    light = bpy.data.objects.new('light', light_data)
-    bpy.context.collection.objects.link(light)
-    light.location = (5, -5, 10)
-    light.data.energy=2000.0
+    bpy.context.view_layer.objects.active = arm
+    reshape_armature(arm, body)
+    fix_mouth(body)
+    if wipe_scene:
+        bpy.ops.object.mode_set(mode='OBJECT')
+        light_data = bpy.data.lights.new('light', type='POINT')
+        light = bpy.data.objects.new('light', light_data)
+        bpy.context.collection.objects.link(light)
+        light.location = (5, -5, 10)
+        light.data.energy=2000.0
+    bpy.context.view_layer.objects.active = arm
+    bpy.ops.object.mode_set(mode='POSE')
