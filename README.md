@@ -1,3 +1,9 @@
+2024/02/07 UPDATE
+
+The project is in process of being updated for Blender 4.0. When conversion is completed, it will function as a Blender add-on. Stay tuned for further updates.
+
+---
+
 This is a set of scripts and templates for exporting HS2/AI characters into Blender.
 
 These scripts give you the exact rig used by the game, with realistic range of motion in knees and hips that is very hard to achieve with metarig. You get full armature + vertex weights + bone constraints + even shape keys (aka blend shapes) out of the box. In addition, you get hair, clothes, and accessories (though as far as how accurate they will be, YMMV.)
@@ -30,7 +36,11 @@ Double check that the "Char directory" is correct and it contains everything it 
 
 * Script appears to hang Blender if 'Refactor armature' is checked:
 
-Some delay is to be expected, because the script has to do some heavy duty number crunching. Enable the system console before running the script, and you'll see that it's working. Processing normally takes 1-2 min, but may take significantly longer in rare cases. 
+Some delay is to be expected, because the script has to do some heavy duty number crunching. Enable the system console before running the script, and you'll see that it's working. Processing normally takes 1-2 min, but may take significantly longer in rare cases. Unchecking 'refactor armature' will significantly speed up the process, at the expense of losing a few features.
+
+* Pieces are missing from the resulting mesh:
+
+Known to happen at times, cause unclear; you will see the same pieces missing if you import the fbx directly. Try to re-export from Studio Neo or use a different character.
 
 * Script prints something about a matrix with no inverse, then takes a very long time to run and produces a messed-up mesh:
 
