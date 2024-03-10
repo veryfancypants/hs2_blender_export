@@ -1,16 +1,15 @@
 import bpy
 import os
+from os import path
 import bmesh
 import math
+import time
 import hashlib
 from mathutils import Matrix, Vector, Euler, Quaternion
 import struct
 import numpy
 from .solve_for_deform import try_load_solution_cache, solve_for_deform, save_solution_cache
-
-class ImportException(Exception):
-    def __init__(self, text):
-        self.text=text
+from . import add_extras, importer
 
 def recompose(v):
         T = Matrix.Translation(v[0])
@@ -109,7 +108,7 @@ bone_classes={
 'cf_J_LegLow03_s_': 'SxSSsxs', # 'Lower Calve Scale'; no dynamic constraint
 
 'cf_J_Foot01_': 'xxxfsss', # 'Foot Scale 1'; need separate scales for left-right and forward-back
-'cf_J_Foot02_': 'xxxfsss', # 'Foot Scale 2'
+'cf_J_Foot02_': 'xssfsss', # 'Foot Scale 2'; allowing offset to fit ankle medial/lateral hits
 'cf_J_Toes01_': 'xcsfsss', #  position is 'Foot Toes Offset' (axis 0.0, -0.15, 1.1); scale is 'Foot Toes Scale'
 
 'cf_J_Toes_Hallux1_': 'sssfsss',
@@ -123,10 +122,12 @@ bone_classes={
 'cf_J_LegKnee_dam_': 'c',
 
 # these are normally scale xz only, but could have scale y if the player messes with 'Torso Scale' sliders
-'cf_J_Spine01_s': 'usSxsss', # offset y is 'Waist Height'; scales are 'Waist Width', 'Waist Thickness', 'Lower Torso Scale'
-
-'cf_J_Spine02_s': 'xxxxsss', # 'Chest Width', 'Chest Thickness', 'Middle Torso Scale'
-'cf_J_Spine03_s': 'xxxxsss', # "Shoulder Width', 'Shoulder Thickness'
+'cf_J_Spine01_s': 'usSssss', # offset y is 'Waist Height'; scales are 'Waist Width', 'Waist Thickness', 'Lower Torso Scale'
+'cf_J_Spine02_s': 'xxxssss', # 'Chest Width', 'Chest Thickness', 'Middle Torso Scale'
+'cf_J_Spine03_s': 'xxxssss', # "Shoulder Width', 'Shoulder Thickness'
+'cf_J_Spine01_r_s': 'xssssss',
+'cf_J_Spine02_r_s': 'xssssss',
+'cf_J_Spine03_r_s': 'xssssss',
 
 'cf_J_Shoulder_': 'f',
 
@@ -141,13 +142,13 @@ bone_classes={
 # off_z is purely the effect of roll of ArmUp00
 'cf_J_ArmUp01_s_': 'SSSSsss', # x,z are 'Upper Arm Deltoid Scale X/Z', the rest not dynamic
 
-'cf_J_ArmUp02_s_': 'xixxsss', # x,z are 'Upper Arm Triceps Scale X/Z'
-'cf_J_ArmUp03_s_': 'xxxxsss', # x,z are 'Upper Arm Lower Scale X/Z'
+'cf_J_ArmUp02_s_': 'sssxsss', # x,z are 'Upper Arm Triceps Scale X/Z'
+'cf_J_ArmUp03_s_': 'sssxsss', # x,z are 'Upper Arm Lower Scale X/Z'
 'cf_J_ArmElbo_low_s_': 'xxxxsss', # x,z are 'Elbow Cap Scale X/Z'
 'cf_J_ArmElboura_s_': 'xxuxsxs', # 'Elbow Scale'
 'cf_J_ArmLow01_': 'xxxfscc', # it seems necessary to allow x-scale to proper fit 3d scans
-'cf_J_ArmLow01_s_': 'xxxxsss', # 'Forearm Upper Scale X/Z'
-'cf_J_ArmLow02_s_': 'xxxxsss', # 'Forearm Lower Scale X/Z'
+'cf_J_ArmLow01_s_': 'sssxsss', # 'Forearm Upper Scale X/Z'
+'cf_J_ArmLow02_s_': 'sssxsss', # 'Forearm Lower Scale X/Z'
 'cf_J_Hand_': 'f',
 'cf_J_Hand_s_': 'xxxxsss', # 'Hand Scale'; need at least separate x and z (different as much as 1.25 and 1.65) to fit the boy
 'cf_J_Hand_Wrist_s_': 'xxxxsss', # Wrist Scale X/Z'
@@ -157,7 +158,7 @@ bone_classes={
 'cf_J_ArmUp03_dam_': '?',
 'cf_J_ArmElbo_dam_01_': 'cxccxxx', # dynamic constraint on position and rotation
 'cf_J_ArmElboura_dam_': 'c',
-'cf_J_ArmLow02_dam_': 'xxxcxss', # no game variable?
+'cf_J_ArmLow02_dam_': 'xxxcxss', 
 'cf_J_Hand_Wrist_dam_': 'xxxcxxx',
 'cf_J_Hand_dam_': 'c',
 
@@ -188,7 +189,7 @@ bone_classes={
 'cf_J_Neck': 'f',
 'cf_J_Head': 'f',
 
-#Mune00 is , Mune01 is Scale 2, Mune02 is Scale 3, Mune03 is Tip Scale, Mune4 is Areola Scale
+#Mune00 is Scale 1, Mune01 is Scale 2, Mune02 is Scale 3, Mune03 is Tip Scale, Mune04 is Areola Scale
 'cf_J_Mune00_': 'iiiuxxx',
 'cf_J_Mune00_t_':'sssssss',
 'cf_J_Mune00_s_':'sssssss', # scale is 'Breast Scale 1'
@@ -205,40 +206,49 @@ bone_classes={
 'cf_J_Mune_Nip01_s_': 'ixsxsss', # scale is 'Nipple Scale'
 'cf_J_Mune_Nip02_s_': 'xxixsss', # scale is 'Nipple Tip Scale'
 
+'cf_J_Neck_s': 'xxxxsss', # how does the game set y-scale?
+'cf_J_NeckUp_s': 'xssssss',
+'cf_J_NeckFront_s': 'xssssss',
+
 'p_cf_head_bone': 'xxxxxxx', 
 'cf_J_FaceRoot': 'xxxxxxx',
-'cf_J_FaceRoot_s': 'xxxsxxx', # not in game; added 's' for dp
+'cf_J_FaceRoot_s': 'xssssss', # not in game
 'cf_J_FaceBase': 'xscxsss', # offset is 'Head Position' (axis 0.00 0.20 0.06); scale is 'Head Scale'
-'cf_J_Head_s': 'xxxxsss',   # Head + Neck Scale'
+'cf_J_Head_s': 'xssxsss',   # natively scale-only ('Head + Neck Scale'), allowing offset improves head positioning
 'cf_J_FaceLowBase': 'xxSxxxx', 
 'cf_J_FaceLow_s': 'xxxxsss',  # 'Lower Head Cheek Scale' gives uniform xyz scaling
+'cf_J_FaceLow_s_s': 'xssssss',  # Created from cf_J_FaceLow_s to separate WG and bone parent functions
 'cf_J_FaceUp_ty': 'xssxsss', # upper face height (moves eyes, ears and everything above them up/down);
  # scale is 'Upper Head Scale'; offset 2 dp
-'cf_J_FaceUp_tz': 'xxsxsss', # upper face depth (moves eyes and eyebrows forward/back)
-# scale is 'Upper Front Head Scale'
+'cf_J_FaceUp_tz': 'xxsxsss', # upper face depth (moves eyes and eyebrows forward/back); scale is 'Upper Front Head Scale'
+'cf_J_FaceUpFront_ty': 'xssssss',
+'cf_J_FaceRoot_r_s': 'xssssss',
 
-'cf_J_CheekLow_': 'sssxsss', # scale is not a native parameter; introduced when dissolving cf_J_FaceLow_s
-'cf_J_CheekUp_': 'sssxsss',
+'cf_J_CheekLow_': 'sssssss',
+'cf_J_CheekUp_': 'sssssss',
+'cf_J_CheekMid_': 'sssssss',
 
 'cf_J_Chin_rs': 'xssssss', # despite the name, controls the entire lower jaw; limited rotation
-'cf_J_ChinTip_s': 'xssxsss',
+'cf_J_ChinTip_s': 'xssssss',
 'cf_J_ChinLow': 'xsxxsss',
+'cf_J_ChinFront_s': 'xssssss',
+'cf_J_ChinFront2_s': 'xssssss',
 
-'cf_J_MouthBase_tr': 'xssxxxs', # 'mouth height', 'mouth depth'
-'cf_J_MouthBase_s': 'xxxxsss',
-'cf_J_Mouth_': 'xsxsxxx', # offset Y moves the mouth corner up/down, quat Z turns the mouth corner
+'cf_J_MouthBase_tr': 'xssxsss', # 'mouth height', 'mouth depth'
+'cf_J_MouthBase_s': 'xssssss',
+'cf_J_Mouth_': 'fffffff', # offset Y moves the mouth corner up/down, quat Z turns the mouth corner
 'cf_J_MouthLow': 'xssxsss', # position & width of the lower lip
 'cf_J_MouthMove': '?',
-
 'cf_J_Mouthup': 'xSxxsss',
 'cf_J_MouthCavity': 'xxSxxxx',
+
 'cf_J_EarLow_': 'xsxxsss',
 'cf_J_EarUp_': 'sssisss',
 'cf_J_EarBase_s_': 'xxsssss', # must allow offset z to move ears forward/back
 
 # the chain is t -> s -> r -> eyepos_rz -> look
 'cf_J_Eye_t_': 'ssssxxx', # offset moves the eye + the eyelid; quat z rotates the eyelids around the forward-back axis
-'cf_J_Eye_s_': 'SSSxssx', # scale x,y scales the eye
+'cf_J_Eye_s_': 'SSSxsss', # scale x,y scales the eye
 'cf_J_Eye_r_': 'xxxsxxx', # quat y rotates the eyelids around the vertical axis; quat z would rotate around the forward-back axis
 'cf_J_EyePos_rz_': 'xxxsxxx', # observed nontrivial quat z - rotating the eyeball around the forward axis
 'cf_J_look_': 'f',
@@ -252,29 +262,36 @@ bone_classes={
 'cf_J_Eye03_s_': 'sssssss',
 'cf_J_Eye04_s_': 'sssssss',
 
-'cf_J_NoseBase_trs': 'xssxxxx',
+'cf_J_NoseBase_trs': 'xssxxxx', # Game uses _trs for offset and _s for rotation & scale. 
+# Offset on _trs moves the entire nose, offset on _s excludes the bridge.
 'cf_J_NoseBase_s': 'xxxssss', # rotation: nose angle, X-axis only
-'cf_J_Nose_r': '?',
-'cf_J_Nose_t': 'xsssxxx',  # offset z moves nose (minus bridge) forward/back; quat x turns nose up/down
-'cf_J_Nose_tip': 'xssxsss', # moves and scales the nose tip
-'cf_J_NoseWing_tx_': 'ssssxxs', # offset moves the nostril; rotation twists the nostril in odd ways
+'cf_J_Nose_r': 'xxxsxxx',
+'cf_J_Nose_t': 'xssssss',  # offset z moves nose (minus bridge) forward/back; quat x turns nose up/down
+'cf_J_Nose_t_s': 'xssssss',
+'cf_J_Nose_tip': 'xssssss', # moves and scales the nose tip
+'cf_J_NoseWing_tx_': 'sssssss', # offset moves the nostril; rotation twists the nostril in odd ways
 'cf_J_NoseBridge_t': 'xssssss', # nose bridge vertical position (y), height (z), & shape (r)
-'cf_J_NoseBridge_s': 'xxxxsss', # nose bridge width
-'cf_J_Neck_s': 'xxxxsss', # how does the game set y-scale?
-
-'cf_J_EarRing_': '?',
+'cf_J_NoseBridge_s': 'xssssss', # nose bridge width
+'cf_J_NoseCheek_s': 'xssssss',
+'cf_J_Nostril_': 'sssssss',
+'cf_J_Nose_Septum': 'xssssss',
+'cf_J_Nasolabial_s': 'xssssss',
 
 'cf_J_Forehead': 'xxxxsss',
-'NeckFront_s': 'xssssss',
-'cf_J_CheekMid_': 'sssxxxx',
-'cf_J_NeckUp': 'xssxsss',
-#'cf_J_ArmUp00_Twist_': 'f',
-#'cf_J_LegUp00_Twist_': 'f',
-'cf_J_Spine01_r_s': 'xssssss',
-'cf_J_Spine02_r_s': 'xssssss',
-'cf_J_Spine03_r_s': 'xssssss',
 'cf_J_UpperJaw': 'sssssss',
 'cf_J_LowerJaw': 'sssxsss',
+
+'balls': 'fffffff',
+'stick_01': 'fffffff',
+'stick_02': 'fffffff',
+'stick_03': 'fffffff',
+'stick_04': 'fffffff',
+'tip_base': 'fffffff',
+'fskin_bottom': 'fffffff',
+'fskin_top': 'fffffff',
+'fskin_left': 'fffffff',
+'fskin_right': 'fffffff',
+'sheath': 'fffffff',
 }
 
 def bone_class(x, comp=None):
@@ -285,6 +302,8 @@ def bone_class(x, comp=None):
         c = bone_classes[x]
     elif x[:-1] in bone_classes:
         c = bone_classes[x[:-1]]
+    else:
+        c='?'
     if c=='?':
         c='???????'
     if c=='f':
@@ -371,8 +390,12 @@ def copy_scale(arm, c, comps='xyz'):
     bone.lock_scale[1]=True
     bone.lock_scale[2]=True
 
+def delete_driver(arm, target_bone, target_prop, target_component):
+    arm.pose.bones[target_bone].driver_remove(target_prop, target_component)
+
 def drive(arm, target_bone, target_prop, target_component,
         driver_bone, driver_prop, formula, order='AUTO'):
+    d=arm.pose.bones[target_bone].driver_remove(target_prop, target_component)
     d=arm.pose.bones[target_bone].driver_add(target_prop, target_component)
     var=d.driver.variables.new()
     var.type='TRANSFORMS'
@@ -387,6 +410,7 @@ def drive2(arm, target_bone, target_prop, target_component,
         driver_bone1, driver_prop1, 
         driver_bone2, driver_prop2, 
         formula, order='AUTO'):
+    arm.pose.bones[target_bone].driver_remove(target_prop, target_component)
     d=arm.pose.bones[target_bone].driver_add(target_prop, target_component)
     var=d.driver.variables.new()
     var.type='TRANSFORMS'
@@ -404,41 +428,10 @@ def drive2(arm, target_bone, target_prop, target_component,
     var.targets[0].rotation_mode = order
     d.driver.expression = formula
 
-def add_spine_rear_soft(arm, body):
-    bpy.ops.object.mode_set(mode='OBJECT')  
-    bpy.context.view_layer.objects.active = arm
-
-    for n in ['1','2','3']:
-        body.vertex_groups.new(name='cf_J_Spine0'+n+'_r_s')
-        old_id = body.vertex_groups['cf_J_Spine0'+n+'_s'].index
-        new_id = body.vertex_groups['cf_J_Spine0'+n+'_r_s'].index
-        #def set_weight(body, vertex, group, weight):
-        for v in body.data.vertices:
-            wold = 0.0
-            for g in v.groups:
-                if g.group==old_id:
-                    front_fraction = max(0,min(1,(v.co[2]+0.5)*2.))
-                    w = g.weight
-                    if front_fraction>0.0:
-                        g.weight=w*front_fraction
-                    else:
-                        body.vertex_groups[old_id].remove([v.index])
-                    if front_fraction<1.0:
-                        body.vertex_groups[new_id].add([v.index], w*(1.-front_fraction), 'ADD')
-                    break
-
-    bpy.ops.object.mode_set(mode='EDIT')
-    for n in ['1','2','3']:
-        bone = arm.data.edit_bones.new('cf_J_Spine0'+n+'_r_s')
-        bone.parent = arm.data.edit_bones['cf_J_Spine0'+n+'_s']
-        bone.head = arm.data.edit_bones['cf_J_Spine0'+n+'_s'].head + Vector([0,0,-0.1])
-        bone.tail = arm.data.edit_bones['cf_J_Spine0'+n+'_s'].tail + Vector([0,0,-0.1])
-    bpy.ops.object.mode_set(mode='POSE')
-    arm.pose.bones['cf_J_Spine03_r_s'].scale=Vector([0.8, 1.0, 1.0])
-
 
 def prettify_armature(arm, body):
-    add_spine_rear_soft(arm, body)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.context.view_layer.objects.active = arm
     bpy.ops.object.mode_set(mode='EDIT')
     #return
     #arm = bpy.data.objects['Armature']
@@ -548,7 +541,7 @@ def prettify_armature(arm, body):
         if x.name[:-1] in ['cf_J_ArmUp01_dam_', 'cf_J_ArmUp02_dam_', 'cf_J_ArmUp03_dam_', 'cf_J_ArmElboura_dam_', 
             'cf_J_ArmElbo_dam_01_', 'cf_J_ArmLow02_dam_','cf_J_Hand_Wrist_dam_', 'cf_J_Hand_dam_']:
                 array[26] = True
-        if x.name in ['cf_J_Hips', 'cf_J_Kosi02', 'cf_J_Kosi01', 'cf_J_Spine01', 'cf_J_Spine02', 'cf_J_Spine03', 'cf_J_Neck', 'cf_J_Head']:
+        if x.name in ['cf_J_Hips', 'cf_J_Kosi02', 'cf_J_Kosi01', 'cf_J_Spine01', 'cf_J_Spine02', 'cf_J_Spine03', 'cf_J_Neck', 'cf_J_Head', 'cf_N_height']:
             array[6]=True # Torso
         if x.name in ['cf_J_Kosi02_s', 'cf_J_Kosi01_s', 'cf_J_Spine01_s', 'cf_J_Spine02_s', 'cf_J_Spine03_s', 'cf_J_Neck_s',
             'cf_J_FaceBase', 'cf_J_Head_s', 
@@ -578,7 +571,7 @@ def prettify_armature(arm, body):
             'cf_J_Nose_r', 'cf_J_NoseBridge_s', 'cf_J_NoseBridge_t', 'cf_J_NoseTip', 'cf_J_NoseBase_s']:
             array[10]=True
         if x.name[:-1] in ['cf_J_NoseWing_tx_']:
-            array[10]=True
+            array[19 if side else 10]=True
         if x.name[:-1] in ['cf_J_CheekLow_', 'cf_J_CheekUp_', 'cf_J_CheekMid_']:
             array[19 if side else 11]=True
         if x.name[:-1] in ['cf_J_MayuTip_s_', 'cf_J_MayuMid_s_', 'cf_J_Mayu_']:
@@ -631,8 +624,8 @@ def prettify_armature(arm, body):
     ('cf_J_LegLowRoll_L', 0, 0, -60, 60, 0, 0),
     ('cf_J_LegLowRoll_R', 0, 0, -60, 60, 0, 0),
 
-    ('cf_J_Shoulder_L', -30, 30, -10, 10, -25, 45),
-    ('cf_J_Shoulder_R', -30, 30, -10, 10, -45, 25),
+    ('cf_J_Shoulder_L', -30, 30, -10, 10, -10, 55),
+    ('cf_J_Shoulder_R', -30, 30, -10, 10, -55, 10),
     ('cf_J_ArmLow01_L', -45, 45, -170, 0, 0, 0),
     ('cf_J_ArmLow01_R', -45, 45, 0, 170, 0, 0),
     ('cf_J_Hand_L', -60, 60, -30, 30, -90, 90),
@@ -641,8 +634,8 @@ def prettify_armature(arm, body):
     limit_rotation_constraints+=[
     ('cf_J_LegUp00_L', -145, 30, -120, 120, -15, 45),
     ('cf_J_LegUp00_R', -145, 30, -120, 120, -45, 15),
-    ('cf_J_ArmUp00_L', -135, 135, -120, 25, -105, 55),
-    ('cf_J_ArmUp00_R', -135, 135, -25, 120, -55, 105),
+    ('cf_J_ArmUp00_L', -135, 135, -120, 25, -105, 20),
+    ('cf_J_ArmUp00_R', -135, 135, -25, 120, -20, 105),
     ]
 
     for c in limit_rotation_constraints:
@@ -686,9 +679,12 @@ def prettify_armature(arm, body):
             'cf_J_Foot01_', 'cf_J_Foot02_', 
             ):
             if c=='cf_J_LegUp01_s_':
-                copy_scale(arm, c, comps='y')
+                copy_scale(arm, c, comps='xy')
             elif c=='cf_J_LegUp02_s_':
                 copy_scale(arm, c, comps='y')
+                copy_location(arm, c, comps='xy')
+            elif c=='cf_J_LegLow01_s_':
+                copy_scale(arm, c, comps='xyz')
                 copy_location(arm, c, comps='xy')
             elif c=='cf_J_LegLow02_s_':
                 copy_scale(arm, c, comps='xyz')
@@ -696,14 +692,15 @@ def prettify_armature(arm, body):
             else:
                 copy_scale(arm, c)
                 copy_location(arm, c)
-            if (c[-1]=='_' and '_s_' in c) or (c in ['cf_J_NoseWing_tx_', 'cf_J_Eye_t_',  'cf_J_EarLow_', 'cf_J_EarUp_']):
+            if (c[-1]=='_' and '_s_' in c) or (c in ['cf_J_NoseWing_tx_', 'cf_J_Eye_t_',  'cf_J_EarLow_', 'cf_J_EarUp_',
+                'cf_J_CheekLow_', 'cf_J_CheekUp_', 'cf_J_CheekMid_']):
                 copy_rotation(arm, c+'R')
 
         s = bone_class(c, 'offset')
         def lock_location(bones, b, n):
             if b in bones:
-                if abs(bones[b].location[n])>0.001:
-                    print("Warning: locking", b, "in non-null location")
+                #if abs(bones[b].location[n])>0.001:
+                #   print("Warning: locking", b, "in non-null location")
                 bones[b].lock_location[n]=True
         for n in range(3):
             if len(s)==3 and (s[n]=='x' or s[n]=='c'):
@@ -756,10 +753,47 @@ def prettify_armature(arm, body):
         for s in ('L','R'):
             #print("Trying to apply constraint", c[1]+s)
             copy_rotation(arm, c[1]+s, target=c[0]+s, flags=c[2], invert='', strength=c[3], order=c[4])
+    
+    arm.data.display_type = 'STICK'
+    for c in arm.data.collections:
+        c.is_visible = False
+    for c in ['Left leg', 'Right leg', 'Left arm', 'Right arm', 'Spine', 'IK']:
+        arm.data.collections[c].is_visible = True
+    arm.show_in_front = True
 
-    for s in 'L','R':
+def delete_drivers(arm):
+    for s,sgn in (('L','-'),('R','')):
+        delete_driver(arm, 'cf_J_ArmUp01_dam_' + s, 'rotation_euler', 0)
+        delete_driver(arm, 'cf_J_ArmUp02_dam_' + s, 'rotation_euler', 0)
+        delete_driver(arm, 'cf_J_SiriDam_' + s, 'rotation_euler', 1)
+        delete_driver(arm, 'cf_J_LegUp01_' + s, 'rotation_euler', 1)
+        delete_driver(arm, 'cf_J_LegUp02_' + s, 'rotation_euler', 1)
+        delete_driver(arm, 'cf_J_ArmElboura_dam_'+s, 'location', 2)
+        delete_driver(arm, 'cf_J_ArmElboura_dam_'+s, 'scale', 1,)
+        delete_driver(arm, 'cf_J_ArmElbo_dam_01_'+s, 'location', 2)
+        delete_driver(arm, 'cf_J_SiriDam_'+s, 'location', 1)
+        delete_driver(arm, 'cf_J_SiriDam_'+s, 'location', 2)
+        delete_driver(arm, 'cf_J_LegUp01_s_'+s, 'location', 1)
+        delete_driver(arm, 'cf_J_LegUp01_s_'+s, 'location', 2)
+        delete_driver(arm, 'cf_J_LegUp01_s_'+s, 'scale', 2)
+        delete_driver(arm, 'cf_J_LegUp01_s_'+s, 'location', 0)
+        delete_driver(arm, 'cf_J_LegUp02_s_'+s, 'scale', 0)
+        delete_driver(arm, 'cf_J_LegUp02_s_'+s, 'scale', 2)
+        delete_driver(arm, 'cf_J_LegLow01_s_'+s, 'location', 2)
+        delete_driver(arm, 'cf_J_LegLow02_s_'+s, 'location', 2)
+        delete_driver(arm, 'cf_J_LegUp02_s_'+s, 'location', 2)
+
+def set_drivers(arm):
+    save_scale = str(arm.pose.bones['cf_J_LegUp01_s_L'].scale[2])
+    save_scale_2x = str(arm.pose.bones['cf_J_LegUp02_s_L'].scale[0])
+    save_scale_2z = str(arm.pose.bones['cf_J_LegUp02_s_L'].scale[2])
+
+    save_legup01_x = str(-arm.pose.bones['cf_J_LegUp01_s_L'].location[0])
+    save_scale_legup01_x = str(arm.pose.bones['cf_J_LegUp01_s_L'].scale[0])
+
+    for s,sgn in (('L','-'),('R','')):
         # when twisting ArmUp00 (twist = along its length), gradient the effect from shoulder to elbow
-        drive(arm, 'cf_J_ArmUp01_dam_' + s, 'rotation_euler', 0, 'cf_J_ArmUp00_'+s, 'ROT_X', '-0.66*var', order='SWING_TWIST_X')
+        drive(arm, 'cf_J_ArmUp01_dam_' + s, 'rotation_euler', 0, 'cf_J_ArmUp00_'+s, 'ROT_X', '-0.75*var', order='SWING_TWIST_X') # changed from game -0.66
         drive(arm, 'cf_J_ArmUp02_dam_' + s, 'rotation_euler', 0, 'cf_J_ArmUp00_'+s, 'ROT_X', '-0.33*var', order='SWING_TWIST_X')
 
         # when twisting LegUp00, likewise gradient the effect from hip to knee, and propagate some twist up the buttock
@@ -768,62 +802,46 @@ def prettify_armature(arm, body):
         drive(arm, 'cf_J_LegUp02_' + s, 'rotation_euler', 1, 'cf_J_LegUp00_'+s, 'ROT_Y', '-0.5*var', order='SWING_TWIST_Y')
         arm.pose.bones['cf_J_ArmUp00_'+s].rotation_mode='XYZ'
 
-    for s,sgn in (('L','-'),('R','')):
         drive(arm, 'cf_J_ArmElboura_dam_'+s, 'location', 2, 'cf_J_ArmLow01_'+s, 'ROT_Y', "-clamp("+sgn+"var-2,0,1)*0.5")
         drive(arm, 'cf_J_ArmElboura_dam_'+s, 'scale', 1, 'cf_J_ArmLow01_'+s, 'ROT_Y', "1+clamp("+sgn+"var-2,0,1)")
         drive(arm, 'cf_J_ArmElbo_dam_01_'+s, 'location', 2, 'cf_J_ArmLow01_'+s, 'ROT_Y', "clamp("+sgn+"var-2,0,1)*0.3")
-
-    # All these need to correct for ROT_Z
-    save_scale = str(arm.pose.bones['cf_J_LegUp01_s_L'].scale[2])
-    save_scale_2x = str(arm.pose.bones['cf_J_LegUp02_s_L'].scale[0])
-    save_scale_2z = str(arm.pose.bones['cf_J_LegUp02_s_L'].scale[2])
-
-    save_legup01_x = str(arm.pose.bones['cf_J_LegUp01_s_L'].location[0])
-    save_scale_legup01_x = str(arm.pose.bones['cf_J_LegUp01_s_L'].scale[0])
-
-    for s,sgn in (('L','-'),('R','')):
-        #def drive2(arm, target_bone, target_prop, target_component, driver_bone1, driver_prop1, driver_bone2, driver_prop2,  formula, order='AUTO'):
 
         # Corrective that kicks in when leg is lifted to the point of touching belly with front upper thigh. Stronger when leg is also bent toward center.
         corrective="max(-var-("+sgn+"var_001)-1.5,0)"
         kwargs={'driver_bone1':'cf_J_LegUp00_'+s, 'driver_prop1':'ROT_X', 'driver_bone2':'cf_J_LegUp00_'+s, 'driver_prop2':'ROT_Z', 'order':'SWING_TWIST_Y'}
         drive2(arm, 'cf_J_SiriDam_'+s, 'location', 1, formula=corrective+"*-0.9", **kwargs)
         drive2(arm, 'cf_J_SiriDam_'+s, 'location', 2, formula=corrective+"*0.9", **kwargs)
-        # 0.6 -0.6 is better for Emily
-        # 0.6 -0.9 or even 0.9 -0.9 good for Cindy
+
+        # optimal values vary a bit from char to char
         drive2(arm, 'cf_J_LegUp01_s_'+s, 'location', 1, formula=corrective+"*0.6", **kwargs)
         drive2(arm, 'cf_J_LegUp01_s_'+s, 'location', 2, formula=corrective+"*-0.9", **kwargs) 
         drive2(arm, 'cf_J_LegUp01_s_'+s, 'scale', 2, formula=save_scale+"+"+corrective+"*-0.3", **kwargs)
 
         # Corrective that kicks in when the leg is simultaneously lifted and bent toward center, especially when it's lifted more than 45 degrees.
         # Push the upper thigh slightly out to minimize clipping the belly and the pubic bone
-        drive2(arm, 'cf_J_LegUp01_s_'+s, 'location', 0, formula=save_legup01_x+"+clamp(-var,0,1)*max("+sgn+"var_001,0)*1.0", **kwargs)
+        drive2(arm, 'cf_J_LegUp01_s_'+s, 'location', 0, formula=sgn+"1*"+save_legup01_x+"+clamp(-var,0,1)*max("+sgn+"var_001,0)*1.0", **kwargs)
 
         # Corrective that kicks in when knee is bent past ~110 degrees.
+        # "Squish" the lower thigh (scale_x up, scale_z down) when the calf is pressed against the lower thigh.
+        # Additionally, widen the entire thigh when we're sharply twisting the thigh bone (see Yoga pose for impact:
+        # without this corrective, lower thigh looks weird there)
         corrective="clamp(abs(var_001)-1.0,0,0.5)+max(var-2.5,0)"
         kwargs={"driver_bone1":"cf_J_LegLow01_"+s, "driver_prop1":"ROT_X", "driver_bone2": "cf_J_LegUp00_"+s, "driver_prop2": "ROT_Y", "order": "SWING_TWIST_Y"}
-        # Calf compresses the flesh of the lower thigh.
         drive2(arm, 'cf_J_LegUp02_s_'+s, 'scale', 0, formula=save_scale_2x+"+"+corrective+"*1.5", **kwargs)
         drive2(arm, 'cf_J_LegUp02_s_'+s, 'scale', 2, formula=save_scale_2z+"+"+corrective+"*-1.5", **kwargs)
 
         corrective="max(var-2.5,0)"
         kwargs={"driver_bone":"cf_J_LegLow01_"+s, "driver_prop":"ROT_X"}
 
-        # In turn, lower thigh pushes the flesh of the calf.
-        drive(arm, 'cf_J_LegLow01_s_'+s, 'location', 2, formula=corrective+"*0.9", **kwargs)
-        drive(arm, 'cf_J_LegLow02_s_'+s, 'location', 2, formula=corrective+"*0.5", **kwargs)
+        # In response, lower thigh pushes the flesh of the calf.
+        pos = str(arm.pose.bones["cf_J_LegLow01_s_L"].location[2])
+        drive(arm, 'cf_J_LegLow01_s_'+s, 'location', 2, formula=pos+"+"+corrective+"*0.9", **kwargs)
+        pos = str(arm.pose.bones["cf_J_LegLow02_s_L"].location[2])
+        drive(arm, 'cf_J_LegLow02_s_'+s, 'location', 2, formula=pos+"+"+corrective+"*0.5", **kwargs)
 
         # Lower part of the thigh responds to two different correctives. It can be pushed forward by a sharply bent knee, and backward by a sharply bent thigh.
         # TODO: this does not work correctly when the thigh is sharply twisted (see: Yoga), because it pushes in the wrong direction.
         drive2(arm, 'cf_J_LegUp02_s_'+s, 'location', 2, 'cf_J_LegUp00_'+s, 'ROT_X', "cf_J_LegLow01_"+s, "ROT_X", "max(-var-1.5,0)*-0.6+max(var_001-2.25,0)*1.0", order='SWING_TWIST_Y')
-    
-    arm.data.display_type = 'STICK'
-    for c in arm.data.collections:
-        c.is_visible = False
-    for c in ['Left leg', 'Right leg', 'Left arm', 'Right arm', 'Spine', 'IK', 'Chin']:
-        arm.data.collections[c].is_visible = True
-    arm.show_in_front = True
-
 
 def add_ik(arm):
     bpy.ops.object.mode_set(mode='OBJECT')  
@@ -1092,11 +1110,8 @@ def load_unity_dump(dump):
     return bone_pos, local_pos, hash
 
 def reshape_armature(path, arm, body, fallback, dumpfilename): 
-    #global deformed_rig
-    #    arm = bpy.data.objects['Armature']
-    boy = body['Boy']>0.0        
-    bpy.ops.object.mode_set(mode='OBJECT')    
-    #bpy.context.view_layer.objects.active = arm
+    boy = body['Boy']>0.0
+    bpy.ops.object.mode_set(mode='OBJECT')
     bpy.ops.object.mode_set(mode='EDIT')
     
     # custom head mesh
@@ -1120,6 +1135,7 @@ def reshape_armature(path, arm, body, fallback, dumpfilename):
         if not x.name in default_rig:
             #print(x.name, x.matrix)
             default_rig[x.name] = x.matrix
+    arm["default_rig"] = default_rig
     #bpy.ops.object.mode_set(mode='EDIT')
 
     # By default, cf_J_Hips is connected to cf_N_Height, but neither Spine01 nor Kosi01 are connected to cf_J_Hips 
@@ -1166,7 +1182,7 @@ def reshape_armature(path, arm, body, fallback, dumpfilename):
 
     bone_pos, _, md5sum = load_unity_dump(dumpfilename)
     if bone_pos==None:
-        raise ImportException("Failed to load the unity dump, aborting")
+        raise importer.ImportException("Failed to load the unity dump, aborting")
 
      # Stretch 'arm' back to 'custom body' 
     bpy.context.view_layer.objects.active = arm
@@ -1182,7 +1198,7 @@ def reshape_armature(path, arm, body, fallback, dumpfilename):
     bpy.ops.object.mode_set(mode='OBJECT')  
     npass=0
     fail_vert=0
-
+    t1 = time.time()
     loaded, map = try_load_solution_cache(path, body_parts, md5sum)
     if not loaded:
         # Solve for undeformed mesh shape
@@ -1199,6 +1215,8 @@ def reshape_armature(path, arm, body, fallback, dumpfilename):
         print("Done in ", npass, " passes, ", fail_vert, "failed vertices")
         #print("Lead time", lead_time, "Total time", total_time)
         save_solution_cache(path, body_parts, md5sum)
+    t2 = time.time()
+    print("Rest position calculated in %.3f s" % (t2-t1)) 
     bpy.ops.object.select_all(action='DESELECT')
     for x in body_parts:
         bpy.data.objects[x["ref"]].select_set(True)
@@ -1214,7 +1232,7 @@ def reshape_armature_fallback(arm, body, dumpfilename):
     
     bone_pos, _, _ = load_unity_dump(dumpfilename)
     if bone_pos==None:
-        raise ImportException("Failed to load the unity dump, aborting")
+        raise importer.ImportException("Failed to load the unity dump, aborting")
     #print(bone_pos)
     bpy.ops.object.mode_set(mode='OBJECT')    
     bpy.context.view_layer.objects.active = arm
@@ -1228,7 +1246,7 @@ def reshape_armature_fallback(arm, body, dumpfilename):
     prettify_armature(arm, body)
 
 
-def load_pose_file(fn):
+def load_pose_file(arm, fn):
     f=None
     try:
         f=open(fn, "r").readlines()
@@ -1242,13 +1260,14 @@ def load_pose_file(fn):
             return {}
     if 'UnityEngine' in f[0]:
         _, v, _ =load_unity_dump(fn)
+        default_rig = arm["default_rig"]
         for x in v:
             if x in default_rig \
             and x in arm.pose.bones \
             and arm.pose.bones[x].parent!=None \
             and arm.pose.bones[x].parent.name in default_rig:
                 default_delta = Matrix(default_rig[arm.pose.bones[x].parent.name]).inverted() @ Matrix(default_rig[x])
-                v[x] = default_delta.inverted() @ v[x]                
+                v[x] = default_delta.inverted() @ v[x]   
         f={}
         for x in v:
             y=v[x].decompose()
@@ -1271,11 +1290,11 @@ def load_pose(a, fn, flags=3):
         return    
     default_rig=arm["default_rig"]
     deformed_rig=arm["deformed_rig"]
-    bpy.ops.object.mode_set(mode='OBJECT')    
+    bpy.ops.object.mode_set(mode='OBJECT')
     bpy.context.view_layer.objects.active = arm
     bpy.ops.object.mode_set(mode='POSE')
     idx_map={'offset':0,'rotation':1,'scale':2}
-    f=load_pose_file(fn)
+    f=load_pose_file(arm, fn)
     print("%d pose entries read\n" % len(f))
     #print(f)
     null_pose=(Vector(), Quaternion(), Vector([1,1,1]))
@@ -1380,12 +1399,6 @@ def rescale_one_bone(x, default_rig, deformed_rig, z, rig_delta={}, delta_z=0.0)
         rescale_one_bone(c, default_rig, deformed_rig, z, rig_delta=rig_delta, delta_z=delta_z)
 
 
-def apply_daisy_protocol(arm, y, z):
-    dp=load_pose_file("assets/daisy_protocol.txt")
-    rescale_one_bone(arm.pose.bones['cf_J_Root'], arm["default_rig"], arm["deformed_rig"], y, rig_delta=dp, delta_z=z)
-    #, deformed_rig, z, rig_delta={}, delta_z=0.0):
-
-
 def dump_pose(a, of, x='cf_J_Root', flags=3):
     arm = bpy.data.objects[a]
     b = arm.data.bones[x]
@@ -1408,20 +1421,51 @@ def dump_pose(a, of, x='cf_J_Root', flags=3):
             changes[n+4]=2
     assert_bone_class_compliance(x, local, arm.pose.bones[x].matrix[0][0])
     comp_name=('offset','rotation','scale')
-    for comp in range(3):
-        c = bone_class(x, comp_name[comp])
-    if (flags & 2) and local[0]!=Vector():
-        s=x+' offset %.4f %.4f %.4f\n' % (local[0][0], local[0][1], local[0][2])
-        of.write(s)        
-    if ((flags & 2) or (bone_class(x, 'rotation') == 'f')) and local[1]!=Quaternion():
-        s=x+' rotation %.4f %.4f %.4f %.4f\n' % (local[1][0], local[1][1], local[1][2], local[1][3])
-        of.write(s)        
-    if (flags & 2) and local[2]!=Vector([1,1,1]):
-        s=x+' scale %.4f %.4f %.4f\n' % (local[2][0], local[2][1], local[2][2])
-        of.write(s)        
-#        s = x+('basis %f %f %f %f  %f %f %f %f  %f %f %f %f  %f %f %f %f\n' % (local[0][0], local[0][1], local[0][2], local[0][3],
-#            local[1][0], local[1][1], local[1][2], local[1][3],
-#            local[2][0], local[2][1], local[2][2], local[2][3],
-#            local[3][0], local[3][1], local[3][2], local[3][3]))
+    if not (x.endswith("_R") and (flags==2)):
+        for comp in range(3):
+            c = bone_class(x, comp_name[comp])
+        if (flags & 2) and local[0]!=Vector():
+            s=x+' offset %.4f %.4f %.4f\n' % (local[0][0], local[0][1], local[0][2])
+            of.write(s)        
+        if local[1]!=Quaternion():
+            bc = bone_class(x, 'rotation')
+            if bc in ['c','x']:
+                print("Not saving", x, "rotation")
+            else:
+                fk = (bc == 'f')
+                if ((flags & 1) and fk) or ((flags & 2) and not fk):
+                    s=x+' rotation %.4f %.4f %.4f %.4f\n' % (local[1][0], local[1][1], local[1][2], local[1][3])
+                    of.write(s)
+        if (flags & 2) and local[2]!=Vector([1,1,1]):
+            s=x+' scale %.4f %.4f %.4f\n' % (local[2][0], local[2][1], local[2][2])
+            of.write(s)        
+    #        s = x+('basis %f %f %f %f  %f %f %f %f  %f %f %f %f  %f %f %f %f\n' % (local[0][0], local[0][1], local[0][2], local[0][3],
+    #            local[1][0], local[1][1], local[1][2], local[1][3],
+    #            local[2][0], local[2][1], local[2][2], local[2][3],
+    #            local[3][0], local[3][1], local[3][2], local[3][3]))
     for x in b.children.keys():
         dump_pose(a, of, x, flags)
+
+
+def set_fk_pose(arm, v):
+    deformed_rig = arm["deformed_rig"]
+    for x in arm.pose.bones:
+        if x.name in deformed_rig and bone_class(x.name, 'rotation')=='f':
+            default_rig = Matrix(deformed_rig[x.name]).decompose()
+            current_rig = x.matrix_basis.decompose()
+            current_rig = (current_rig[0], default_rig[1], current_rig[2])
+            x.matrix_basis = recompose(current_rig) #deformed_rig[x.name]
+    for x in v:
+        #arm.pose.bones[x[0]].rotation_mode=rot_mode
+        arm.pose.bones[x[0]].rotation_euler=Euler((x[1]*math.pi/180., x[2]*math.pi/180., x[3]*math.pi/180.), rot_mode)
+        if x[0][-1]=='L':
+            asym = False
+            for y in v:
+                if y[0]==x[0][:-1]+'R':
+                    asym=True
+                    break
+            if asym:
+                continue
+            mult = -1.0 if len(x)>4 else 1.0
+            #arm.pose.bones[x[0][:-1]+'R'].rotation_mode=rot_mode
+            arm.pose.bones[x[0][:-1]+'R'].rotation_euler=Euler((x[1]*math.pi/180., mult*x[2]*math.pi/180., mult*x[3]*math.pi/180.), rot_mode)

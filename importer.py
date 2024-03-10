@@ -3,10 +3,11 @@ import os
 import bmesh
 import math
 import hashlib
-from mathutils import Matrix, Vector, Euler, Quaternion
+from mathutils import Matrix, Vector, Euler, Quaternion, Color
 import struct
 import numpy as np
 import time
+import decimal
 
 from bpy.props import (
     BoolProperty,
@@ -17,8 +18,11 @@ from bpy.props import (
     FloatVectorProperty
 )
 
-from . import add_extras, armature
-from .armature import ImportException
+from . import add_extras, armature, attributes
+
+class ImportException(Exception):
+    def __init__(self, text):
+        self.text=text
 
 bodyparts=[
 'o_eyebase_L',
@@ -145,12 +149,18 @@ def rebuild_torso(arm, body):
         print(len(nails), "nail pieces")
         #print("Warning: failed to find the right number of nails: reconstruct may fail")
     nails=join_meshes(nails, 'nails')
-    #bpy.ops.object.select_all(action='QWERTY')
+    bpy.context.view_layer.objects.active = nails #bpy.data.objects[nails]
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_mode(type="VERT")
+    bpy.ops.mesh.select_non_manifold()
+    bpy.ops.mesh.remove_doubles()
+    bpy.ops.object.mode_set(mode='OBJECT')
+
     if body['Boy']>0.0:
         if 'cm_o_dan00' in bpy.data.objects:
             other.append('cm_o_dan00')
         if 'cm_o_dan_f' in bpy.data.objects:
-            other.append('cm_o_dan_f')            
+            other.append('cm_o_dan_f')
     body=join_meshes(other, bn)
     body["nails"]=nails.name
     return body
@@ -174,39 +184,43 @@ def disconnect_link(mat, node):
 # and BumpMap.png to be a bump map (R=B=255, variance in G.)
 # But I have at least one test case where _converted is a bump map.
 # This is a rough test to detect the condition and to switch the correct image.
-def test_inverted_bump_map(tex):
-    w = tex.size[0]
-    h = tex.size[1]
-    v=tex.pixels[:]
-    for x in range(w//4, w*3//4, max(1,w//32)):
-        for y in range(h//4, h*3//4, max(1,h//32)):
-            index = ( y* w + x ) * 4
-            pixel = [
-                v[index], # RED
-                v[index + 1], # GREEN
-                v[index + 2], # BLUE
-            ]
+def test_inverted_bump_map(tex_pixels):
+    #w = tex.size[0]
+    #h = tex.size[1]
+    #v=tex.pixels[:]
+    w = tex_pixels.shape[1]
+    h = tex_pixels.shape[0]
+    #v = 
+    for x in range(w//4, w*3//4, max(1,w//16)):
+        for y in range(h//4, h*3//4, max(1,h//16)):
+            pixel = tex_pixels[y,x,:]
+            #index = ( y* w + x ) * 4
+            #pixel = tex_pixel
+            #    v[index], # RED
+            #    v[index + 1], # GREEN
+            #    v[index + 2], # BLUE
+            #]
             #print("BumpMap center pixel", pixel)
             if not (pixel[0]>0.999 and pixel[2]>0.999):
                 return False
     return True
 
-def estimate_bump_gamma(tex):
+def estimate_bump_gamma(tex, v):
     # Fast copy of pixel data from bpy.data to numpy array.
     # (Naively doing 'np.array(tex.pixels)' can take as long as 15 s for an 8k texture)
-    v = np.zeros((tex.size[0]*tex.size[1], 4), 'f')
-    tex.pixels.foreach_get(v.ravel())
+    #v = np.zeros((tex.size[0]*tex.size[1], 4), 'f')
+    #tex.pixels.foreach_get(v.ravel())
     if tex.size[0]>=1024 or tex.size[1]>=1024:
-        v = v.reshape([tex.size[0], tex.size[1], 4])
+        #v = v.reshape([tex.size[0], tex.size[1], 4])
         v = v[::max(1,tex.size[0]//512), ::max(1,tex.size[1]//512), :]
-        v = v.reshape([-1, 4])
+    v = v.reshape([-1, 4])
     averages = np.median(v, axis=0)
     #print("Bump texture", tex.filepath, tex.size[0], tex.size[1], "%.5f %.5f" % (averages[0], averages[1]))
 
     bump_gamma_r = 1.0
     bump_gamma_g = 1.6
     if averages[0]==1.0 or averages[1]==1.0:
-        print("ERROR: this is not a normal map!")
+        print("ERROR: ", tex.filepath, "is not a normal map!")
         return 0.0, 0.0
 
     if (averages[0]>0.47 and averages[0]<0.53) and \
@@ -220,6 +234,7 @@ def estimate_bump_gamma(tex):
     return bump_gamma_r, bump_gamma_g
 
 def set_bump(obj, node, x, y):
+    t1=time.time()
     if isinstance(obj, bpy.types.Material):
         mat = obj
     else:
@@ -228,7 +243,13 @@ def set_bump(obj, node, x, y):
     tex = set_tex(obj, node, x, 'BumpMap'+y+'_converted', csp='Non-Color')
     fix_bump_gamma = False
     disable = False
-    if (tex is None) or test_inverted_bump_map(tex):
+    tex_pixels = None
+    if tex is not None:
+        tex_pixels = np.zeros((tex.size[0]*tex.size[1], 4), 'f')
+        tex.pixels.foreach_get(tex_pixels.ravel())
+        tex_pixels = tex_pixels.reshape([tex.size[1], tex.size[0], 4])
+
+    if (tex is None) or test_inverted_bump_map(tex_pixels):
         if tex is not None:
             print("Bump texture", tex.filepath, tex.size[0], tex.size[1])
             print("Mislabeled BumpMap textures detected: fixing...")
@@ -245,7 +266,7 @@ def set_bump(obj, node, x, y):
                 n.inputs[scale].default_value = 0.0
         return False
 
-    bump_gamma_r, bump_gamma_g = estimate_bump_gamma(tex)
+    bump_gamma_r, bump_gamma_g = estimate_bump_gamma(tex, tex_pixels)
     if bump_gamma_r==0.0:
         for n in mat.node_tree.nodes:
             if (scale in n.inputs):
@@ -258,6 +279,9 @@ def set_bump(obj, node, x, y):
             n.inputs[gamma_r].default_value = bump_gamma_r
         if (gamma_g in n.inputs):
             n.inputs[gamma_g].default_value = bump_gamma_g
+    t2=time.time()
+    #if tex is not None:
+    #    print("set_bump", tex.filepath, t2-t1)
     return (tex is not None)
 
 def load_textures(arm, body, hair_color, eye_color, suffix):
@@ -303,30 +327,31 @@ def load_textures(arm, body, hair_color, eye_color, suffix):
     set_tex(eyebase_L, 'Image Texture.003', 'eye', 'Texture4', csp='Non-Color')    
     #if eye_color!=None:
     eye_mat.node_tree.nodes['RGB'].outputs[0].default_value = eye_color
+    body["eye_mat"]=eye_mat
 
     head_mat=replace_mat(head, bpy.data.materials['Head'].copy(), 'Head_' + suffix)
-    set_tex(head, 'Image Texture', 'skin_head', 'MainTex', alpha='NONE')
-    set_tex(head, 'Image Texture.002', 'skin_head', 'DetailMainTex', csp='Non-Color')
-    set_tex(head, 'Image Texture.003', 'skin_head', 'DetailGlossMap', csp='Non-Color')
-    set_bump(head, 'Image Texture.007', 'skin_head', '')
+    set_tex(head, 'MainTex', 'skin_head', 'MainTex', alpha='NONE')
+    set_tex(head, 'DetailMainTex', 'skin_head', 'DetailMainTex', csp='Non-Color')
+    set_tex(head, 'DetailGlossMap', 'skin_head', 'DetailGlossMap', csp='Non-Color')
+    set_bump(head, 'BumpMap', 'skin_head', '')
 
-    if set_tex(head, 'Image Texture.004', 'skin_head', 'SubsurfaceAlbedo', csp='Non-Color') is None:
-        disconnect_link(head_mat, 'Image Texture.004')
+    if set_tex(head, 'Subsurface', 'skin_head', 'SubsurfaceAlbedo', csp='Non-Color') is None:
+        disconnect_link(head_mat, 'Subsurface')
     else:
-        head_mat.node_tree.nodes['Group'].inputs['Subsurface/MainTex mix'].default_value=0.2
+        head_mat.node_tree.nodes['Shader'].inputs['Subsurface/MainTex mix'].default_value=0.2
     if body['Boy']>0.0:
         # No bump map 2
-        head_mat.node_tree.nodes['Group'].inputs['Bump scale 2'].default_value=0.0
-        head_mat.node_tree.nodes['Group'].inputs['Textured skin gloss'].default_value=1.0
-        head_mat.node_tree.nodes['Group'].inputs['Textured skin gloss delta'].default_value = 0.850
-        head_mat.node_tree.nodes['Vector Math.003'].inputs[3].default_value = 5.0 # UV coordinate scale for textured gloss
+        head_mat.node_tree.nodes['Shader'].inputs['Bump scale 2'].default_value=0.0
+        head_mat.node_tree.nodes['Shader'].inputs['Textured skin gloss'].default_value=1.0
+        head_mat.node_tree.nodes['Shader'].inputs['Textured skin gloss delta'].default_value = 0.850
+        #head_mat.node_tree.nodes['Vector Math.003'].inputs[3].default_value = 5.0 # UV coordinate scale for textured gloss
     else:
-        set_bump(head, 'Image Texture.006', 'skin_head', '2')
-    #head_mat.node_tree.nodes['Value'].outputs[0].default_value=0.0
-    set_tex(head, 'Image Texture.001', 'skin_head', 'Texture3', csp='Non-Color')
+        set_bump(head, 'BumpMap2', 'skin_head', '2')
+    set_tex(head, 'Eyebrow', 'skin_head', 'Texture3', csp='Non-Color')
+
     hair_mats.append(head_mat)
-    #if hair_color!=None:
     head_mat.node_tree.nodes['RGB'].outputs[0].default_value = hair_color
+    body["head_mat"] = head_mat
 
     replace_mat(tang, bpy.data.materials['Tongue'].copy(), 'Tongue_' + suffix)
     set_tex(tang, 'Image Texture', 'tang', 'MainTex')
@@ -348,10 +373,11 @@ def load_textures(arm, body, hair_color, eye_color, suffix):
     if set_tex(body, 'Subsurface', 'skin_body', 'SubsurfaceAlbedo', csp='Non-Color') is None:
         disconnect_link(torso_mat, 'Subsurface')
     else:
-        torso_mat.node_tree.nodes['Group.004'].inputs['Subsurface/MainTex mix'].default_value=0.2
-    body["torso_mat"] = torso_mat.name
+        torso_mat.node_tree.nodes['Shader'].inputs['Subsurface/MainTex mix'].default_value=0.2
+    body["torso_mat"] = torso_mat
 
-    replace_mat(nails, bpy.data.materials['Nails'].copy(), 'Nails_' + suffix)
+    body["nails_mat"] = replace_mat(nails, bpy.data.materials['Nails'].copy(), 'Nails_' + suffix)
+    
     hair=[]
     for ch in arm.children:
         x=ch.name
@@ -376,6 +402,7 @@ def load_textures(arm, body, hair_color, eye_color, suffix):
             print('Texturing', x, 'as hair')
             obj.cycles.use_adaptive_subdivision = True
             obj.cycles.dicing_rate=2.0
+            obj.add_rest_position_attribute = True
             mod=obj.modifiers.new("subsurf", "SUBSURF")
             mod.levels=2
             try:
@@ -560,7 +587,7 @@ def import_bodyparts(fbx, wipe_scene):
     'N_Chest': 'cf_J_Neck',
     'N_Head': 'cf_J_Head',
     }
-    
+    delete_unparented = True
     for tn in trash_objects:
         id_data = bpy.data.objects[tn]
         v=[y.name for y in id_data.children]
@@ -616,7 +643,9 @@ def import_bodyparts(fbx, wipe_scene):
                     while c is not None:
                         print(c.name)
                         c = c.parent
-                #y.parent = id_data.parent                    
+                    if delete_unparented:
+                        bpy.data.objects.remove(y)
+                #y.parent = id_data.parent
             #y.matrix_parent_inverse = id_data.parent.matrix_world.inverted()
         #print('Deleting', tn)
     #bpy.abcd()
@@ -644,34 +673,216 @@ def import_bodyparts(fbx, wipe_scene):
     #bpy.ops.object.scale_clear()
     return True, arm, body
 
+def disable_extra_bones(arm):
+    ns = arm.pose.bones["cf_J_NoseBase_trs"].scale 
+    arm.pose.bones["cf_J_NoseBase_s"].location += arm.pose.bones["cf_J_NoseBase_trs"].location
+    arm.pose.bones["cf_J_NoseBase_s"].scale *= ns
+    arm.pose.bones["cf_J_NoseBridge_t"].location += arm.pose.bones["cf_J_NoseBase_trs"].location - Vector([0,0.31,0.11])*(scale-Vector([1,1,1]))
+    arm.pose.bones["cf_J_NoseBridge_t"].scale *= ns
+    arm.pose.bones["cf_J_NoseBase_trs"].location = Vector([0,0,0])
+    arm.pose.bones["cf_J_NoseBase_trs"].scale = Vector([1,1,1])
 
-def load_customization(arm, custfn):
+    """
+    # probably requires slight tweaks to offsets
+    arm.pose.bones["cf_J_Head_s"].scale *= arm.pose.bones["cf_J_FaceBase_s"].scale
+    for k in range(3):
+        arm.pose.bones["cf_J_FaceRoot_s"].scale[k] /= arm.pose.bones["cf_J_FaceBase_s"].scale[k]
+    arm.pose.bones["cf_J_FaceBase_s"].scale = Vector([1,1,1])
+    """
+
+    # lock and hide away disabled bones
+    # update rig table
+
+def save_with_backup(s, fn):
+    backup_path = fn + ".bak"
+    current_md5 = None
+    backup_md5 = None
+    new_md5 = hashlib.md5(s.encode('utf-8')).hexdigest()
     try:
-        f=open(custfn, "r").readlines()
+        backup_md5=hashlib.md5(open(backup_path,'rb').read()).hexdigest()
     except:
-        print("Failed to open", custfn)
+        pass
+    try:
+        current_md5=hashlib.md5(open(fn,'rb').read()).hexdigest()
+    except:
+        pass
+
+    if (current_md5 is not None) and current_md5==new_md5:
         return
-    print("Customization script found")
-    for x in f:
+
+    if (current_md5 is not None) and os.stat(fn).st_size>0 and (backup_md5 != current_md5):
+        try:
+            os.remove(backup_path+".bak")
+        except:
+            pass
+        try:
+            os.remove(backup_path)
+        except:
+            pass
+        try:
+            os.rename(fn, backup_path)
+        except:
+            pass
+    of=open(fn,"wb")
+    of.write(s.encode('utf-8'))
+    of.close()
+
+def f4(x):
+    return ("%.4f" % x).rstrip('0').rstrip('.')
+
+def customization_string(arm, x):
+    s = ""
+    b = arm.pose.bones[x]
+    local = arm.pose.bones[x].matrix_basis
+    local = armature.snap(local.decompose())
+    if "deformed_uncustomized_rig" in arm:
+        set_reference = True
+        reference = arm["deformed_uncustomized_rig"]
+    else:
+        set_reference = False
+        reference = {}
+    #print(reference, x, x in reference)
+    if x in reference:
+        reference = armature.snap(Matrix(reference[x]).decompose())
+    else:
+        reference = (Vector([0,0,0]), Quaternion([1,0,0,0]), Vector([1,1,1]))
+    comp_name=('offset','rotation','scale')
+    if not x.endswith("_R"):
+            #for comp in range(3):
+            #    c = armature.bone_class(x, comp_name[comp])
+            old_null = True
+            null = True
+            change = ""
+            change2 = ""
+            bc = armature.bone_class(x, 'offset')
+            #print(x, bc)
+            if 's' in bc:
+                if local[0]!=Vector([0,0,0]):
+                    null = False
+                if reference[0]!=Vector([0,0,0]):
+                    old_null = False
+                if local[0]!=reference[0] or not set_reference:
+                    change += "l"
+                    #change2 += "%.4f %.4f %.4f" % (local[0][0]*100, local[0][1]*100, local[0][2]*100)
+                    #change2 += "{:f} {:f} {:f}" % (decimal.Decimal(local[0][0]*100), decimal.Decimal(local[0][1]*100), decimal.Decimal(local[0][2]*100))
+                    change2 = f4(local[0][0]*100) + " " + f4(local[0][1]*100) + " " + f4(local[0][2]*100)
+                    #s+=x+' offset %.4f %.4f %.4f\n' % (local[0][0]*100, local[0][1]*100, local[0][2]*100)
+            else:
+                if local[0]!=reference[0] and not ('f' in bc):
+                    print("Not saving offset change on", x)
+
+            bc = armature.bone_class(x, 'rotation')
+            if bc=='s': #not (bc in ['c','x','f', '?']):
+                if local[1]!=Quaternion([1,0,0,0]):
+                    null = False
+                if reference[1]!=Quaternion([1,0,0,0]):
+                    old_null = False
+                if local[1]!=reference[1] or not set_reference:
+                    euler = local[1].to_euler(b.rotation_mode)
+                    #s+=x+' rotation %.4f %.4f %.4f\n' % (local[1][0], local[1][1], local[1][2])
+                    change += "r"
+                    if len(change2)>0:
+                        change2+=" "
+                    change2 += f4(euler[0]*180./3.1415926) + " " + f4(euler[1]*180./3.1415926) + " " + f4(euler[2]*180./3.1415926)
+            else:
+                if local[1]!=reference[1] and bc!='f':
+                    print("Not saving rotation change on", x)
+            bc = armature.bone_class(x, 'scale')
+            if 's' in bc:
+                if local[2]!=Vector([1,1,1]):
+                    null = False
+                if reference[2]!=Vector([1,1,1]):
+                    old_null = False
+                if local[2]!=reference[2]  or not set_reference:
+                    change += "s"
+                    if len(change2)>0:
+                        change2+=" "
+                    change2 += f4(local[2][0]) + " " + f4(local[2][1]) + " " + f4(local[2][2])
+            else:
+                if local[2]!=reference[2] and not ('f' in bc):
+                    print("Not saving scale change on", x)
+            if null and len(change)>0:
+                s += x + " null\n"
+            elif len(change)>0:
+                s += x+" "+change+" "+change2+"\n"
+                    #s += x+' scale %.4f %.4f %.4f\n' % (local[2][0], local[2][1], local[2][2])
+    b = arm.data.bones[x]
+    for y in b.children.keys():
+        s += customization_string(arm, y)
+    return s
+
+#def save_customization(arm, custfn):
+#    s = customization_string(arm, "cf_N_height")
+#    #print(s)
+#    #save_with_backup(s, arm["path"]+'/customization')
+
+def reset_customization(arm):
+    #default_rig=arm["default_rig"]
+    deformed_rig=arm["deformed_rig"]
+    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.context.view_layer.objects.active = arm
+    bpy.ops.object.mode_set(mode='POSE')
+    idx_map={'offset':0,'rotation':1,'scale':2}
+    null_pose=(Vector(), Quaternion(), Vector([1,1,1]))
+    ch=('offset','rotation','scale')
+    for x in arm.pose.bones.keys():
+        pose = list(arm.pose.bones[x].matrix_basis.decompose())
+        if x in arm["deformed_uncustomized_rig"]:
+            known=True
+            op = Matrix(arm["deformed_uncustomized_rig"][x]).decompose()
+        else:
+            op = null_pose
+        for y in range(3):
+            c=armature.bone_class(x, ch[y])
+            for n in range(len(op[y])):
+                if c[n if y!=1 else 0] in ('s','i','u'):
+                    #ampl = sum([sum(delta[x]) for x in range(4)])
+                    if abs(pose[y][n]-op[y][n])>0.0001:
+                        print(x, y, n, abs(pose[y][n]-op[y][n]), pose[y][n], op[y][n])
+                    pose[y][n]=op[y][n]
+        arm.pose.bones[x].matrix_basis=armature.recompose(pose)
+        deformed_rig[x]=arm.pose.bones[x].matrix_basis.copy()
+
+def load_customization_from_string(arm, s):
+    print("load_customization_from_string", s)
+    s = s.split('\n')
+    for x in s:
+        if len(x)<3:
+            continue
+        if x[0]=='#':
+            continue
         y = x.split()
         bone = y[0]
         if bone in arm.pose.bones:
             insns = y[1]
-            y = y[2:]
-            if insns.startswith('l'):
-                arm.pose.bones[bone].location = Vector([float(y[0])*0.01, float(y[1])*0.01, float(y[2])*0.01])
-                y=y[3:]
-                insns=insns[1:]
-            if insns.startswith('r'):
-                arm.pose.bones[bone].rotation_euler = Euler([float(y[0])*math.pi/180., float(y[1])*math.pi/180., float(y[2])*math.pi/180.])
-                y=y[3:]
-                insns=insns[1:]
-            if insns.startswith('s'):
-                arm.pose.bones[bone].scale = Vector([float(y[0]), float(y[1]), float(y[2])])
-                y=y[3:]
-                insns=insns[1:]
+            if insns=='null':
+                arm.pose.bones[bone].location = Vector([0,0,0])
+                arm.pose.bones[bone].rotation_euler = Euler([0,0,0])
+                arm.pose.bones[bone].scale = Vector([1,1,1])
+            else:
+                y = y[2:]
+                if insns.startswith('l'):
+                    arm.pose.bones[bone].location = Vector([float(y[0])*0.01, float(y[1])*0.01, float(y[2])*0.01])
+                    y=y[3:]
+                    insns=insns[1:]
+                if insns.startswith('r'):
+                    arm.pose.bones[bone].rotation_euler = Euler([float(y[0])*math.pi/180., float(y[1])*math.pi/180., float(y[2])*math.pi/180.])
+                    y=y[3:]
+                    insns=insns[1:]
+                if insns.startswith('s'):
+                    arm.pose.bones[bone].scale = Vector([float(y[0]), float(y[1]), float(y[2])])
+                    y=y[3:]
+                    insns=insns[1:]
             arm["deformed_rig"][bone]=arm.pose.bones[bone].matrix_basis.copy()
 
+def load_customization(arm, custfn):
+    try:
+        f=open(custfn, "rb").read()
+    except:
+        print("Failed to open", custfn)
+        return
+    print("Customization script found")
+    load_customization_from_string(arm, f.decode('utf-8'))
 
 def fix_neck_loop(body):
     bpy.ops.object.mode_set(mode='OBJECT')
@@ -683,9 +894,9 @@ def fix_neck_loop(body):
     v=set()
     for x in bmd.edges:
         if x.is_boundary:
-            if len(x.verts[0].link_faces)<=3:
+            if len(x.verts[0].link_faces)<=4:
                 v.add(x.verts[0].index)
-            if len(x.verts[1].link_faces)<=3:
+            if len(x.verts[1].link_faces)<=4:
                 v.add(x.verts[1].index)
 
     vg = body.vertex_groups['cf_J_Head_s'].index
@@ -707,14 +918,46 @@ def fix_neck_loop(body):
 
 last_import_status='...'
 
+def get_mean_skin_tone(body):
+    mat = body["torso_mat"]
+    tex = mat.node_tree.nodes["MainTex"].image
 
-def import_body(input, refactor, do_tweak_mouth, do_tweak_cheeks, add_injector,
+    w = tex.size[0]
+    h = tex.size[1]
+    index = ( int(h*0.766)* w + int(w*0.127) ) * 4
+
+    # See Blender issue #117830
+    tex.colorspace_settings.name="Non-Color"
+    pixel = Color((
+        tex.pixels[index], 
+        tex.pixels[index + 1], 
+        tex.pixels[index + 2],
+    ))
+    tex.colorspace_settings.name="sRGB"
+    #print("Skin tone (sRGB):", pixel)
+    pixel = pixel.from_srgb_to_scene_linear()
+    #print("Skin tone (scene linear):", pixel)
+    pixel.v = math.pow(pixel.v, 0.25)
+    #print("Skin tone (gamma corrected):", pixel)
+    return pixel
+
+def import_body(input, refactor, 
+        do_extend_safe, do_extend_full, 
+        add_injector,
         add_exhaust,
-        replace_teeth, wipe, c_eye, c_hair, name,
-        ):
+        replace_teeth, wipe, c_eye, c_hair,
+        name, customization):
     #global path, fbx, suffix, dumpfilename, last_import_status, customization
     global path, last_import_status
     print('import_body', input)
+    print("add_injector", add_injector)
+    if isinstance(add_injector, str):
+        if add_injector=="Yes":
+            add_injector=True
+        elif add_injector=="No":
+            add_injector=False
+        else:
+            add_injector=None
     hair_color=c_hair
     eye_color=c_eye
     path=input
@@ -733,18 +976,20 @@ def import_body(input, refactor, do_tweak_mouth, do_tweak_cheeks, add_injector,
     if len(fbxs)>0:
         fbx=path+fbxs[0]
         #if not use_config:
-        name=fbxs[0][:-4]
+        #name=fbxs[0][:-4]
     else:
         fbx=None
         last_import_status='Failed to locate the FBX'
         print('Failed to locate the FBX')
         return None
 
+    root_path = path
     custfile = path+'/customization'
     custfile2 = path+'/customization2'
     path += "Textures/"
 
-    suffix=name
+    skin_tone = None
+    suffix=""
 
     if hair_color!=None:
         if len(hair_color)==3:
@@ -759,118 +1004,207 @@ def import_body(input, refactor, do_tweak_mouth, do_tweak_cheeks, add_injector,
         success, arm, body = import_bodyparts(fbx, wipe)
         t2=time.time()
         print("FBX imported in %.3f s" % (t2-t1))
-        if success:
-            t1=time.time()
-            body=rebuild_torso(arm, body)
-            load_textures(arm, body, hair_color, eye_color, suffix)
-            fixup_head(body)
-            fixup_torso(body)
-            stitch_head_to_torso(body)
-            fix_neck_loop(body)
-            t2=time.time()
-            print("Basic restructure done in %.3f s" % (t2-t1))
-
-            body.add_rest_position_attribute = True
-
-            arm.name=name
-            bpy.ops.object.mode_set(mode='OBJECT')
-            bpy.context.view_layer.objects.active = body
-            bpy.context.object.modifiers["Armature"].show_in_editmode = True
-            bpy.context.object.modifiers["Armature"].show_on_cage = True
-            bpy.context.view_layer.objects.active = arm
-            if do_tweak_cheeks:
-                add_extras.repaint_cheeks(arm, body)
-
-            t1=time.time()
-            refactor = armature.reshape_armature(path, arm, body, not refactor, dumpfilename)
-            t2=time.time()
-            print("Armature refactor done in %.3f s" % (t2-t1))
-            #return
-            armature.add_ik(arm)
-
-            load_customization(arm, custfile)
-            print(body.data.vertices[9908].normal)
-            body.active_shape_key_index = 0
-            #print(body.data.vertices[9908].normal)
-            body.data.update()
-            #print(body.data.vertices[9908].normal)
-            #return
-
-            if replace_teeth:
-                tooth = bpy.data.objects[body["o_tooth"]]
-                tooth.data=bpy.data.meshes["Prefab Tooth v2"]
-                tooth.data.shape_keys.key_blocks["20"].value=1.
-                tooth.data.shape_keys.key_blocks["Smaller"].value=1.
-                tooth.location=Vector([0, 15.92, -0.08])
-                #tooth.data*=3.
-
-            if do_tweak_mouth and refactor:
-                t1=time.time()
-                add_extras.tweak_mouth(arm, body)
-                t2=time.time()
-                print("Mouth tweak done in %.3f s" % (t2-t1))
-
-            t1=time.time()
-
-            if add_injector is None:
-                add_injector = (body['Boy'] > 0.0)
-            if add_injector:
-                if refactor:
-                    print("Trying to attach the injector")
-                    add_extras.attach_injector(arm, body)
-                else:
-                    print("Can't attach the injector (fallback armature)")
-            if add_exhaust and refactor:
-                add_extras.attach_exhaust(arm, body)
-            if do_tweak_mouth:
-                load_customization(arm, custfile2)
-
-            add_extras.add_mouth_blendshape(body)
-            add_extras.tweak_nose(body)
-            add_extras.paint_scalp(body)
-            t2=time.time()
-            print("Tweaks done in %.3f s" % (t2-t1))
-
-            #return
-            if wipe:
-                #t1=time.time()
-                bpy.ops.object.mode_set(mode='OBJECT')
-                light_data = bpy.data.lights.new('light', type='POINT')
-                light = bpy.data.objects.new('light', light_data)
-                bpy.context.collection.objects.link(light)
-                light.location = (0.2, -2, 1.5)
-                light.data.energy=100.0
-                #t2=time.time()
-                #print("Scene wiped in %.3f s" % (t2-t1))
-            bpy.context.view_layer.objects.active = arm
-            bpy.ops.object.mode_set(mode='OBJECT')
-
-            bpy.types.Object.body = body.name
-            #arm.hair_color = FloatVectorProperty(name="Hair color", default=hair_color[:3], subtype='COLOR', min=0.0, max=1.0, get=get_hair_color, set=set_hair_color)
-            #arm.eye_color = FloatVectorProperty(name="Eye color", default=eye_color[:3], subtype='COLOR', min=0.0, max=1.0, get=get_eye_color, set=set_eye_color)
-            #if body['Boy']>0.0 and refactor:
-            #    create_male_properties(arm)
-            arm["hair_color"] = hair_color[:3]
-            arm["eye_color"] = eye_color[:3]
-
-            arm["daisy_protocol"] = 0.0
-            arm["custom_geo"] = 1.0
-            arm['ik'] = True
-
-            body["pore_depth"] = 1.0
-            body["pore_intensity"] = 1.0
-            body["pore_density"] = 1.0
-
-            bpy.context.view_layer.objects.active = body
-            bpy.ops.object.mode_set(mode='EDIT')
-            bpy.ops.object.mode_set(mode='OBJECT')
-            bpy.context.view_layer.objects.active = arm
-            bpy.ops.object.mode_set(mode='POSE')
-
-            last_import_status=name+' imported successfully'
-        else:
-            last_import_status='Failed to locate the FBX'
+        if not success:
+            last_import_status='Body import failure'
             print('Failed to import body')
+            return None
+
+        t1=time.time()
+        body=rebuild_torso(arm, body)
+        t2=time.time()
+        print("rebuild_torso done in %.3f s" % (t2-t1))
+        t1=t2
+        load_textures(arm, body, hair_color, eye_color, suffix)
+        t2=time.time()
+        print("load_textures done in %.3f s" % (t2-t1))
+        t1=t2
+        fixup_head(body)
+        fixup_torso(body)
+        stitch_head_to_torso(body)
+        fix_neck_loop(body)
+        t2=time.time()
+        print("Basic restructure done in %.3f s" % (t2-t1))
+
+        body.add_rest_position_attribute = True
+
+        #arm.name=name
+        bpy.ops.object.mode_set(mode='OBJECT')
+        bpy.context.view_layer.objects.active = body
+        for mod in bpy.context.object.modifiers:
+            mod.show_in_editmode = True
+            mod.show_on_cage = True
+        bpy.context.view_layer.objects.active = arm
+
+        t1=time.time()
+        refactor = armature.reshape_armature(path, arm, body, not refactor, dumpfilename)
+        t2=time.time()
+        print("Armature refactor done in %.3f s" % (t2-t1))
+        armature.add_ik(arm)
+
+        body.active_shape_key_index = 0
+        body.data.update()
+
+        tooth = bpy.data.objects[body["o_tooth"]]
+        if replace_teeth:
+            tooth.data=bpy.data.meshes["Prefab Tooth v2"]
+            tooth.data.shape_keys.key_blocks["20"].value=0.
+            tooth.data.shape_keys.key_blocks["Smaller"].value=0.
+            tooth.location=Vector([0, 15.95, -0.08])
+
+        t1=time.time()
+
+        bpy.context.view_layer.objects.active = body
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.object.mode_set(mode='OBJECT')
+        bpy.context.view_layer.objects.active = arm
+        bpy.ops.object.mode_set(mode='POSE')
+
+        male = (body['Boy'] > 0.0)
+
+        if add_injector is None:
+            add_injector = male
+        if add_injector:
+            if refactor:
+                print("Trying to attach the injector")
+                add_extras.attach_injector(arm, body)
+            else:
+                print("Can't attach the injector (fallback armature)")
+        if add_exhaust and refactor:
+            add_extras.attach_exhaust(arm, body)
+
+        if do_extend_safe:
+            # Add a number of new customization shape keys.
+            add_extras.add_shape_keys(arm, body, do_extend_full)
+
+            # Reversible mods.
+            # This splits a number of VGs and adds a number of bones, but in such a manner that, with new bones in null pose,
+            # the result should be virtually identical to unmodified mesh
+            # (slight changes are expected, because new bones are slightly offset from their parents for posing convenience,
+            # but they should be minimal).
+            add_extras.add_skull_soft_neutral(arm, body)
+            add_extras.add_spine_rear_soft(arm, body)
+
+            # This is irreversible but harmless (fixing upper/lower lip identifications.)
+            add_extras.repaint_mouth_minimal(arm, body)
+
+        # Irreversible mods (unique or fundamentally changed VGs)
+        if do_extend_full:
+            # Repaint nose bridge to forehead transition
+            add_extras.repaint_nose_bridge(arm, body)
+            # Repaint upper neck to lower skull transition
+            add_extras.repaint_upper_neck(arm, body)
+            # Eliminate cf_J_FaceLow_s, reassigning all its weights to other VGs
+            # Add two new bones to control nose-cheek and nasolabial fold areas
+            add_extras.repaint_face(arm, body)
+            # Add bones and VGs for nostrils and nasal septum
+            add_extras.add_nostrils(arm, body)
+
+        # Scalp VG (for curves hair attachment)
+        add_extras.paint_scalp(arm, body)
+
+        t2=time.time()
+        print("Tweaks done in %.3f s" % (t2-t1))
+        t1=t2
+
+        if wipe:
+            bpy.ops.object.mode_set(mode='OBJECT')
+            light_data = bpy.data.lights.new('light', type='POINT')
+            light = bpy.data.objects.new('light', light_data)
+            bpy.context.collection.objects.link(light)
+            light.location = (0.2, -2, 1.5)
+            light.data.energy=100.0
+        bpy.context.view_layer.objects.active = arm
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+        arm["body"] = body
+        arm["tooth"] = tooth
+        #arm["path"] = root_path
+
+        body["pore_depth"] = 1.0
+        body["pore_intensity"] = 1.0
+        body["pore_density"] = 1.0
+
+        body["patchy skin"] = [1.0, 1.0, 1.0]
+
+        bpy.types.Object.skin_tone_shift = bpy.props.FloatVectorProperty(
+            name="Skin Tone Shift",
+            #type='FLOAT_VECTOR',
+            default=(0.0, 0.0, 0.0),
+            min=-100.0,
+            max=100.0,
+            update=lambda self, context: None
+        )
+        #body.data["skin tone shift"] = [0.0, 0.0, 0.0]
+        body.id_properties_ensure()
+        body.id_properties_ui("patchy skin").update(min=0, max=10)
+        body.id_properties_ui("pore_depth").update(min=0, max=10)
+        body.id_properties_ui("pore_density").update(min=0, max=10)
+        body.id_properties_ui("pore_intensity").update(min=0, max=10)
+        #body.data.id_properties_ensure()
+        #body.data.id_properties_ui("skin tone shift").update(min=-100, max=100)
+
+        bpy.types.Object.mean_skin_tone = bpy.props.FloatVectorProperty(
+            name="Mean Skin Tone",
+            default=get_mean_skin_tone(body),
+            update=lambda self, context: None 
+        )
+
+        bpy.context.view_layer.objects.active = body
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.object.mode_set(mode='OBJECT')
+        bpy.context.view_layer.objects.active = arm
+        bpy.ops.object.mode_set(mode='POSE')
+
+        arm["deformed_uncustomized_rig"]={}
+        for bone in arm.pose.bones:
+            arm["deformed_uncustomized_rig"][bone.name]=bone.matrix_basis.copy()
+
+        # Load customizations after all new bones have been created
+        load_customization(arm, custfile)
+        #if do_tweak_mouth:
+        #    load_customization(arm, custfile2)
+
+        arm.pose.bones['cf_J_Mouth_L'].location = Vector([0,0,0])
+        arm.pose.bones['cf_J_Mouth_L'].rotation_euler = Euler([0,0,0])
+        arm.pose.bones['cf_J_Mouth_L'].scale = Vector([1,1,1])
+        arm.pose.bones['cf_J_Mouth_R'].location = Vector([0,0,0])
+        arm.pose.bones['cf_J_Mouth_R'].rotation_euler = Euler([0,0,0])
+        arm.pose.bones['cf_J_Mouth_R'].scale = Vector([1,1,1])
+
+        if customization is not None:
+            load_customization_from_string(arm, customization)
+
+        # Finally, set drivers (they need final values of all shape parameters)
+        armature.set_drivers(arm)
+        t2=time.time()
+        print("Attributes done in %.3f s" % (t2-t1))
+        t1=t2
+
+        # memorize coordinates and normals of all verts in T-pose
+        add_extras.add_t_pos(arm, body)
+
+        attributes.set_equipment(attributes.hs2object())
+
+        bpy.ops.object.mode_set(mode='OBJECT')
+        bpy.context.view_layer.objects.active = body
+        bpy.ops.paint.weight_paint_toggle()
+        bpy.ops.object.vertex_group_clean(group_select_mode='ALL', limit=0.005)
+        bpy.ops.paint.weight_paint_toggle()
+        bpy.context.view_layer.objects.active = arm
+        bpy.ops.object.mode_set(mode='POSE')
+
+        arm["dump_dir"] = input
+        arm["Eye color"] = c_eye
+        arm["Hair color"] = c_hair
+        arm["Skin tone"] = body.mean_skin_tone
+        arm["Name"] = name
+        arm.name = name
+
+        last_import_status='Import successful'
+
+        t2=time.time()
+        print("Wrap-up done in %.3f s" % (t2-t1))
+        t1=t2
     except ImportException as e:
         print(e.text)
         last_import_status=e.text
@@ -878,3 +1212,14 @@ def import_body(input, refactor, do_tweak_mouth, do_tweak_cheeks, add_injector,
         last_import_status='Import failed, see system console for details'
         raise
     return arm
+
+"""
+def reset_customization(arm):
+    for bone in arm.pose.bones:
+        if bone.name in arm["deformed_uncustomized_rig"]:
+            delta = bone.matrix_basis - Matrix(arm["deformed_uncustomized_rig"][bone.name])
+            ampl = sum([sum(delta[x]) for x in range(4)])
+            if ampl>0.0001:
+                print(bone.name, ampl, bone.matrix_basis, arm["deformed_uncustomized_rig"][bone.name])
+                bone.matrix_basis = Matrix(arm["deformed_uncustomized_rig"][bone.name])
+"""

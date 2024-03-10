@@ -1,5 +1,6 @@
 import bpy
 import os
+import sys
 import bmesh
 import math
 import hashlib
@@ -8,6 +9,9 @@ import struct
 import numpy
 import json
 import hashlib
+import uuid
+
+analyzer_enabled = False
 
 from .armature import (
     reshape_armature, 
@@ -34,29 +38,6 @@ from bpy.types import (
     Operator,
     Panel,
     PropertyGroup,
-)
-
-from .attributes import (
-    get_eagerness,
-    get_length,
-    get_girth,
-    get_volume,
-    get_wet,
-    get_sheath,
-    get_exhaust,
-    set_eagerness,
-    set_length,
-    set_girth,
-    set_volume,
-    set_wet,
-    set_sheath,
-    set_exhaust,
-    get_ik,
-    set_ik,
-    get_custom_geo,
-    set_custom_geo,
-    get_daisy_protocol,
-    set_daisy_protocol,
 )
 
 bl_info = {
@@ -91,63 +72,23 @@ def hs2object():
         return None
     if arm.type=='MESH':
         arm = arm.parent
+    if arm is None:
+        return None
     if arm.type!='ARMATURE':
         return None
     return arm
 
+stored_json_preset_map=""
 
-
-def get_hair_color(self):
-    #print('get_hair_color', self)
-    h = hs2object()
-    try:
-        return h['hair_color']
-    except:
-        return (0.8, 0.8, 0.5)
-
-def set_hair_color(self, color):
-    h = hs2object()
-    if h is None:
-        return
-    h['hair_color']=color
-    color=(color[0],color[1],color[2],1.0)
-    for mat in h['hair_mats']:
-        if 'RGB' in mat.node_tree.nodes:
-            mat.node_tree.nodes['RGB'].outputs[0].default_value = color
-        else:
-            mat.node_tree.nodes['Principled BSDF'].inputs['Base Color'].default_value = color
-
-def get_eye_color(self):
-    h = hs2object()
-    try:
-        color = h['eye_color']
-        return color
-    except:
-        return (0.0, 0.0, 0.8)
-
-def set_eye_color(self, color):
-    print("set_eye_color", color)
-    h = hs2object()
-    if h is None:
-        return
-    h['eye_color']=color
-    for body in h.children:
-        if body.type!="MESH":
-            continue
-        eye_mat = [x for x in body.material_slots.keys() if ('Eyes' in x and not 'Eyeshadow' in x)]
-        if len(eye_mat)>0:
-            bpy.data.materials[eye_mat[0]].node_tree.nodes['RGB'].outputs[0].default_value = (color[0],color[1],color[2],1.0)
-        #else:
-        #    print("No eye mat")
-
-
-
-preset_list=[]
+#preset_list=[]
 preset_map={}
 waifus_path=""
 presets_dirty = False
 
 def get_preset_list(self, context):
+    preset_list = []
+    for k in preset_map:
+        preset_list.append((str(k), preset_map[k].name, preset_map[k]["uuid"], k))
     return preset_list
 
 def get_export_dir(self):
@@ -159,41 +100,103 @@ def set_export_dir(self, x):
         presets_dirty = True
     waifus_path=x
 
-
 #
 #
 #   PRESET LIST
 #
 #  
 
+class Preset(dict):
+    def __init__(self,name,path,eye_color,hair_color,uid=None):
+        self.name=name
+        self.path=path
+        self.eye_color=eye_color
+        self.hair_color=hair_color
+        self["uuid"] = uid or str(uuid.uuid4())
+
+    def get_path(self):
+        if len(self.path)>0:
+            if self.path[0]!='/':
+                return waifus_path+self.path
+            else:
+                return self.path[1:]
+        else:
+            return ""
+    def set_path(self, path):
+        if path.startswith(waifus_path):
+            path=path[len(waifus_path):]
+            while path.startswith('/'):
+                path=path[1:]
+        else:
+            path = "/" + path
+        changed = (self.path != path)
+        self.path = path
+        return changed
+
+    def set_eye_color(self, c):
+        changed = any([abs(x[0]-x[1])>0.0001 for x in zip(self.eye_color, c)])
+        self.eye_color = c
+        return changed
+
+    def set_hair_color(self, c):
+        changed = any([abs(x[0]-x[1])>0.0001 for x in zip(self.hair_color, c)])
+        self.hair_color = c
+        return changed
+
+    def as_dict(self):
+        v={"name":self.name, "path":self.path, "eye_color":self.eye_color, "hair_color":self.hair_color}
+        for x in self:
+            v[x]=self[x]
+        return v
+
+def convert_preset(list_preset):
+    return Preset(list_preset[0],list_preset[1],list_preset[2],list_preset[3])
+
+def convert_preset_from_dict(dict_preset):
+    pr=Preset(dict_preset["name"],dict_preset["path"],dict_preset["eye_color"],dict_preset["hair_color"],dict_preset["uuid"])
+    dict_preset.pop("name")
+    dict_preset.pop("path")
+    dict_preset.pop("eye_color")
+    dict_preset.pop("hair_color")
+    dict_preset.pop("uuid")
+    for x in dict_preset:
+        pr[x]=dict_preset[x]
+    return pr
 
 def load_presets():
-    global preset_list, preset_map, waifus_path, presets_dirty
+    print("load_presets")
+    global preset_map, waifus_path, presets_dirty, stored_json_preset_map
     preset_map={}
     # Tricky! I can't write 'preset_list=[]', because there's a reference to the _original_ instance of preset_list
     # stored inside hs2rig_data.presets. And if I simply reassign it, the UI will keep on using the old list.
-    preset_list.clear()
+    #preset_list.clear()
     index=0
     presets_dirty = False
-    if False:
-        cfg_path = os.path.dirname(__file__)+"/assets/hs2blender.json"
-        try:
-            fp=open(cfg_path, "r")
-            cfg = json.load(fp)
-            fp.close()
-            waifus_path = cfg["waifus_path"]
-            json_preset_map = cfg["presets"]
-            for x in json_preset_map:
-                preset_map[int(x)]=json_preset_map[x]
+    loaded = False
 
-            for k in preset_map:
-                #preset_map[index]=[x[0], y[0], colors[0:3], colors[3:6], None]
-                #print(k, type(k), preset_map[k][0])
-                preset_list.append((str(k), preset_map[k][0], preset_map[k][0], k))
-
-        except:
-            pass
-    else:
+    cfg_path = os.path.dirname(__file__)+"/assets/hs2blender.json"
+    try:
+        fp=open(cfg_path, "r")
+        cfg = json.load(fp)
+        fp.close()
+        waifus_path = cfg["waifus_path"]
+        json_preset_map = cfg["presets"]
+        #stored_json_preset_map = json_preset_map
+        for x in json_preset_map:
+            preset_map[int(x)]=json_preset_map[x]
+            if isinstance(preset_map[int(x)], list):
+                preset_map[int(x)] = convert_preset(preset_map[int(x)])
+            elif isinstance(preset_map[int(x)], dict):
+                preset_map[int(x)] = convert_preset_from_dict(preset_map[int(x)])
+            #elif isinstance(preset_map[int(x)], str):
+            #    v = json.loads(preset_map[int(x)])
+            #    preset_map[int(x)] = convert_preset_from_dict(v)
+            else:
+                print("Unexpected preset type")
+        loaded = True
+    except:
+        pass
+    if not loaded:
         try:
             cfg=open(config_path,"r").readlines()
             waifus_path=cfg[0].strip()
@@ -211,15 +214,21 @@ def load_presets():
                 #else:
                 #    y[0]=y[0][1:]
                 extras = x[7] if len(x)>7 else None
-                preset_map[index]=[x[0], y[0], colors[0:3], colors[3:6], None]
-                preset_list.append((str(index), x[0], x[0], index))
+                preset_map[index]=Preset(x[0], y[0], colors[0:3], colors[3:6])
+                #preset_list.append((str(index), x[0], x[0], index))
                 index+=1
         except:
             pass
-    
-    print(preset_list)
     n = 0
 
+    #for x in preset_map:
+    #    if not "uuid" in preset_map[x]:
+    #        preset_map[x]["uuid"] = str(uuid.uuid4())
+
+    #for k in preset_map:
+    #    #preset_map[index]=[x[0], y[0], colors[0:3], colors[3:6], None]
+    #    #print(k, type(k), preset_map[k][0])
+    #    preset_list.append((str(k), preset_map[k].name, preset_map[k]["uuid"], k))
 
     map_path = os.path.dirname(__file__)+"/assets/hash_map.txt"
     textures=set()
@@ -250,11 +259,7 @@ def load_presets():
     print(len(textures), "previously indexed textures")
     #print(textures.pop())
     for x in preset_map:
-        dump_dir = preset_map[x][1]
-        if dump_dir[0]=='/':
-            dump_dir = dump_dir[1:]
-        else:
-            dump_dir = waifus_path+dump_dir
+        dump_dir = preset_map[x].get_path()
         try:
             print(dump_dir+'/Textures/')
             v=os.listdir(dump_dir+'/Textures/')
@@ -276,21 +281,9 @@ def load_presets():
                 saved_hash_map.write(ff+" "+md5+"\n")
     saved_hash_map.close()
     print(n, "newly indexed textures, ", len(importer.hash_to_file_map), "unique hashes")
-    preset_list.append((str(index), "<New>", "<New>", index))
-    preset = 0
-    try:
-        preset = int(bpy.context.scene.hs2rig_data.presets)
-    except:
-        pass
-    try:
-        #print("Reloaded presets; trying to reapply", bpy.context.scene.hs2rig_data.presets)
-        preset_select(None, preset)
-    except:
-        pass
 
 in_preset_select = False
 def preset_update(self, context):
-    #print("preset_update")
     global presets_dirty, preset_map, waifus_path
 
     if in_preset_select:
@@ -302,127 +295,68 @@ def preset_update(self, context):
         presets_dirty = True
 
     current = int(bpy.context.scene.hs2rig_data.presets)
-    #print("current", current, type(current))
-    #print("preset_map", preset_map)
-    #print("included", current in preset_map)
-    if current in preset_map:
-        #print("In the map")
-        #name, path, eye_color, hair_color, _ = preset_map[current]
-        s = bpy.context.scene.hs2rig_data.char_name
-        if preset_map[current][0] != s:
-            preset_map[current][0] = s
-            preset_list[current]=(str(current),s,s,current)
-            presets_dirty = True
-        path = bpy.context.scene.hs2rig_data.dump_dir[:]
-        if path.startswith(waifus_path):
-            path=path[len(waifus_path):]
-            while path.startswith('/'):
-                path=path[1:]
-        else:
-            path = "/" + path
-        if path != preset_map[current][1]:
-            preset_map[current][1] = path
-            presets_dirty = True
-        c = list(bpy.context.scene.hs2rig_data.preset_eye_color[:])
-        if any([abs(x[0]-x[1])>0.0001 for x in zip(preset_map[current][2], c)]):
-            preset_map[current][2] = c
-            presets_dirty = True
-        c = list(bpy.context.scene.hs2rig_data.preset_hair_color[:])
-        if any([abs(x[0]-x[1])>0.0001 for x in zip(preset_map[current][3], c)]):
-            preset_map[current][3] = c
-            presets_dirty = True
+    v = attributes.collect_mat_attributes()
+    p = find_preset(hs2object())
+    if p is not None:
+        for x in v:
+            p[x]=v[x]
+
+    #if current in preset_map:
+    #    s = bpy.context.scene.hs2rig_data.char_name
+    #    if preset_map[current].name != s:
+    #        preset_map[current].name = s
+    #        #preset_list[current]=(str(current),s,preset_map[current]["uuid"],current)
+    #        presets_dirty = True
+    #    #if preset_map[current].set_path(bpy.context.scene.hs2rig_data.dump_dir[:]):
+    #    #    presets_dirty = True
 
 def save_presets():
     global presets_dirty
     preset_update(None,None)
 
     cfg_path = os.path.dirname(__file__)+"/assets/hs2blender.json"
-    backup_path = cfg_path + ".bak"
-    current_md5 = None
-    backup_md5 = None
-    try:
-        backup_md5=hashlib.md5(open(backup_path,'rb').read()).hexdigest()
-    except:
-        pass
-    try:
-        current_md5=hashlib.md5(open(cfg_path,'rb').read()).hexdigest()
-    except:
-        pass
 
-    if (current_md5 is not None) and os.stat(cfg_path).st_size>0 and (backup_md5 != current_md5):
-        try:
-            os.remove(backup_path+".bak")
-        except:
-            pass
-        try:
-            os.remove(backup_path+".bak")
-        except:
-            pass
-        try:
-            os.remove(backup_path)
-        except:
-            pass
-        try:
-            os.rename(cfg_path, backup_path)
-        except:
-            pass
-
-    fp=open(cfg_path, "w")
     cfg = {
     "waifus_path":waifus_path,
-    "presets":preset_map
+    "presets":{x:preset_map[x].as_dict() for x in preset_map},
     }
     #print(preset_map)
-    json.dump(cfg, fp, indent=4)
-    fp.close()
+    s = json.dumps(cfg, indent=4)
+    importer.save_with_backup(s, cfg_path)
     presets_dirty = False
     return
 
-def replace_preset(index, name, path, hair_color, eye_color):
-    return
+def delete_preset():
+    global preset_map, presets_dirty
+    id=bpy.context.scene.hs2rig_data.presets
+    print("delete_preset", id)
+    preset_map.pop(int(id))
+    if int(id)-1 in preset_map:
+        bpy.context.scene.hs2rig_data.presets = str(int(id)-1)
 
-def add_new_preset(name, path, hair_color, eye_color):
-    return
-
-def preset_get(self):
-    try:
-        return self['presets']
-    except:
-        return 0
-
-def preset_select(self, value):
-    global in_preset_select, preset_list, preset_map
-    #print("preset_select", self, type(self), value, type(value), value in preset_map)
-    if self is not None:
-        self['presets']=value
-    if value == len(preset_map):
-        s = "<New>"
-        preset_map[value] = [s, "", bpy.context.scene.hs2rig_data.preset_eye_color[:], bpy.context.scene.hs2rig_data.preset_hair_color[:], None]
-        #print("Old preset list tail", preset_list[-1])
-        preset_list.pop()
-        preset_list.append((str(value), s, s, value))
-        value+=1
-        preset_list.append((str(value), "<New>", "<New>", value))
-        in_preset_select = True
-        bpy.context.scene.hs2rig_data.char_name = s
-        bpy.context.scene.hs2rig_data.dump_dir = waifus_path+"/"
-        in_preset_select = False
-        #print("New preset list tail", preset_list[-1])
+def add_new_preset(h):
+    if h is None:
         return
-    if value in preset_map:
-        in_preset_select = True
-        name, path, eye_color, hair_color, _ = preset_map[value]
-        bpy.context.scene.hs2rig_data.char_name = name
-        if len(path)>0:
-            if path[0]!='/':
-                path=waifus_path+path
-            else:
-                path=path[1:]
-        bpy.context.scene.hs2rig_data.dump_dir = path
-        bpy.context.scene.hs2rig_data.preset_eye_color = eye_color
-        #print("Eye color", eye_color)
-        bpy.context.scene.hs2rig_data.preset_hair_color = hair_color
-        in_preset_select = False
+    global preset_map, presets_dirty
+    value = len(preset_map)
+    s = bpy.context.scene.hs2rig_data.char_name
+    preset_map[value] = Preset(s, h["dump_dir"], h["Eye color"][:], h["Hair color"][:])
+    #preset_list.append((str(value), s, preset_map[value]["uuid"], value))
+    h["preset_uuid"] = preset_map[value]["uuid"]
+    preset_update(None,None)
+
+def find_preset(h):
+    if h is None:
+        return None
+    if not "preset_uuid" in h:
+        return None
+    for p in preset_map:
+        if preset_map[p]["uuid"]==h["preset_uuid"]:
+            return preset_map[p]
+    return None
+
+analyzer_report=''
+
 
 #
 #
@@ -471,10 +405,10 @@ standard_pose_list=[
           ('cf_J_Foot02_L',40,0,0),
           ('cf_J_Foot02_R',25,0,0),
           ('cf_J_Shoulder_L',15,0,-25),
-          ('cf_J_Shoulder_R',-25,0,-45),
-          ('cf_J_ArmUp00_L',135,5,-75),
-          ('cf_J_ArmUp00_R',-140,0,-50),
-          ('cf_J_ArmLow01_L',20,-150,0),
+          ('cf_J_Shoulder_R',-25,0,-55),
+          ('cf_J_ArmUp00_L',135,5,-60),
+          ('cf_J_ArmUp00_R',-155,0,-20),
+          ('cf_J_ArmLow01_L',40,-150,0),
           ('cf_J_ArmLow01_R',-45,145,0),
             ]),
 ('Crawl', 'assets/crawling.txt'),
@@ -484,6 +418,28 @@ standard_pose_list=[
 ]
 
 standard_pose_list_names = [(x[0],x[0],x[0]) for x in standard_pose_list]
+
+def get_mouth_open(self):
+#    arm = bpy.context.active_object
+    h = hs2object()
+    try:
+        return h["mouth_open"]
+    except:
+        return 0.0
+
+def set_mouth_open(self, val):
+    h = hs2object()
+    if h is None:
+        return
+    h["mouth_open"]=val
+    for x in h.children:
+        if x.type != 'MESH':
+            continue
+        if x.data.shape_keys is None:
+            continue
+        for y in ['k03_open2', 'k10_open2']:
+            if y in x.data.shape_keys.key_blocks:
+                x.data.shape_keys.key_blocks[y].value = val * 0.01
 
 def get_finger_curl(self):
 #    arm = bpy.context.active_object
@@ -508,8 +464,6 @@ def set_finger_curl(self, x):
         #arm.pose.bones[x[0][:-1]+'R'].rotation_mode=rot_mode
         arm.pose.bones[x[0][:-1]+'R'].rotation_euler=Euler((x[1]*math.pi/180., mult*x[2]*math.pi/180., mult*x[3]*math.pi/180.), rot_mode)
 
-#    eval('bpy.ops.' + self.primitive + '()')
-
 def standard_pose_get(self):
     try:
         return self['standard_pose']
@@ -520,7 +474,49 @@ def standard_pose_select(self, value):
    print("standard_pose_select", self, value)
    self['standard_pose']=value
    set_fixed_pose(bpy.context, value)
-    
+
+injector_options=[
+("Auto","Auto","Use gender"),
+("Yes","Yes","Attach"),
+("No","No","Do not attach")
+]
+
+
+def get_attr(name):
+    return attributes.get_attr(name)
+
+def set_attr(name, x, store=True):
+    global presets_dirty
+    if store:
+        current = int(bpy.context.scene.hs2rig_data.presets)
+        if current in preset_map:
+            if name=="Eye color":
+                if preset_map[current].set_eye_color(x):
+                    presets_dirty = True
+            elif name=="Hair color":
+                if preset_map[current].set_hair_color(x):
+                    presets_dirty = True
+            else:
+                if (not name in preset_map[current]) or (preset_map[current][name] != x):
+                    preset_map[current][name] = x
+                    presets_dirty = True
+
+    attributes.set_attr(name, x)
+
+def get_default_attr(name):
+    try:
+        return attributes.get_default_attr(name)
+    except:
+        return None
+
+def WrapProperty(prop, name, store=True, **kwargs):
+    return prop(name=name,
+        get=lambda s: get_attr(name), 
+        set=lambda s,x: set_attr(name,x,store=store),
+        update=lambda self, context: None,
+        default=get_default_attr(name),
+        **kwargs)
+
 class hs2rig_props(PropertyGroup):
     #
     #   Plugin-wide settings
@@ -530,66 +526,42 @@ class hs2rig_props(PropertyGroup):
         default='c:\\temp\\hs2\\export',
         description='Export directory',
         get=get_export_dir,
-        set=set_export_dir
+        set=set_export_dir,
+        subtype="DIR_PATH",
     )
     presets: bpy.props.EnumProperty(items=get_preset_list,
             description="description",
-            default=None,
-            get=preset_get,
-            set=preset_select
+            default=None
         )
     standard_poses: bpy.props.EnumProperty(items=standard_pose_list_names,
+            name="Standard poses",
             description="description of poses",
             default=None,
             get=standard_pose_get,
             set=standard_pose_select
         )
+    run_analyzer: BoolProperty(name="Analyzer", default=False, description="Analyzer")
+
     #
-    #  Import configuration, read from the preset and/or set by the user in the import box
+    #  Import configuration, set by the user in the import box
     #
-    char_name: StringProperty(name="Name", default="BR-Chan",update=preset_update)
-    dump_dir: StringProperty(
-        name="Char directory",
-        default='c:\\temp\\hs2\\export\\BR-Chan',
-        description='Char directory',
-        update=preset_update
-    )
     refactor: BoolProperty(name="Refactor armature", 
         default=True,
-        description="When checked, the armature will be recalculated so that all body shape adjustments become part of the pose."
+        description="When checked, the armature will be recalculated so that all body shape adjustments become part of the pose. "
         " It is slower and it sometimes fails, but it makes imported clothing and hair interchangeable between characters"
         )
-    tweak_mouth: BoolProperty(name="Tweak mouth", default=False,
-        description="Tweak mouth and chin bones and weights to make it possible to operate the mouth with the cf_J_Chin_rs bone."
-        "Will slightly alter the appearance."
-        )
-    tweak_cheeks: BoolProperty(name="Tweak cheeks", default=True,
-        description="Add new bones to improve control over cheek shapes."
-        "Will slightly alter the appearance."
-        )
+    extend_safe: BoolProperty(name="Extend (safe)", default=True,
+        description="Apply various enhancements to the mesh and the rig")
+    extend_full: BoolProperty(name="Extend (full)", default=False,
+        description="Apply aggressive enhancements to the mesh and the rig. Will alter the appearance")
     replace_teeth: BoolProperty(name="Replace teeth", default=True, description="Replace exported teeth with a known-good version")
-    add_injector: BoolProperty(name="Add an injector", default=False, description="Add a prefabricated injector and attempt to stitch it onto the mesh")
+    add_injector: EnumProperty(name="Add an injector", 
+        items=injector_options,
+        default="Auto", 
+        description="Add a prefabricated injector and attempt to stitch it onto the mesh")
     add_exhaust: BoolProperty(name="Add an exhaust", default=True, description="Add a prefabricated exhaust port and attempt to stitch it onto the mesh")
     wipe: BoolProperty(name="Wipe scene before import", default=True,
         description="When checked, all existing objects will be deleted from the scene before the new character is added")
-    preset_hair_color: FloatVectorProperty(name="Preset hair color", default=(0,0,0), subtype='COLOR', min=0.0, max=1.0, update=preset_update)
-    preset_eye_color: FloatVectorProperty(name="Preset eye color", default=(0.8,0.8,0.5), subtype='COLOR', min=0.0, max=1.0, update=preset_update)
-
-    #
-    # Character shape customization
-    #
-
-    custom_geo: FloatProperty(
-        name="Body customization", min=0, max=2,
-        default=1, precision=2,
-        description="Morphs between default body shape and character specific body shape",
-        get=get_custom_geo,
-        set=set_custom_geo
-    )
-    daisy_protocol: FloatProperty(name="Daisy protocol",
-        default=0.0, soft_min=0.0, soft_max=1.5,
-        description="Don't ask",
-        get=get_daisy_protocol, set=set_daisy_protocol)
 
     #
     #  Character posing and appearance adjustment
@@ -599,29 +571,28 @@ class hs2rig_props(PropertyGroup):
     # It is only an interface object with no owned data; the actual hair color is stored as a custom property of the armature.
     # Ditto length, exhaust, etc.
     #
+    char_name: WrapProperty(StringProperty, "Name")
 
     finger_curl_scale: FloatProperty(
         name="Finger curl", min=0, max=100,
         default=10, precision=1,
         description="Finger curl",
         get=get_finger_curl,
-        set=set_finger_curl        
+        set=set_finger_curl
     )
-    ik: BoolProperty(name='IK', default=True, get=get_ik, set=set_ik)
-    hair_color: FloatVectorProperty(name="Hair color", default=(0,0,0), subtype='COLOR', min=0.0, max=1.0, get=get_hair_color, set=set_hair_color)
-    eye_color: FloatVectorProperty(name="Eye color", default=(0.8,0.8,0.5), subtype='COLOR', min=0.0, max=1.0, get=get_eye_color, set=set_eye_color)
-    eagerness: FloatProperty(name="Eagerness", default=25.0, soft_min=0.0, soft_max=100.0, step=1, get=get_eagerness, set=set_eagerness)
-    length: FloatProperty(name="Length", default=75.0, soft_min=0.0, soft_max=100.0, step=1, get=get_length, set=set_length)
-    girth: FloatProperty(name="Girth", default=50.0, soft_min=0.0, soft_max=100.0, step=1, get=get_girth, set=set_girth)
-    volume: FloatProperty(name="Volume", default=75.0, soft_min=0.0, soft_max=100.0, step=1, get=get_volume, set=set_volume)
-    exhaust: FloatProperty(name="Exhaust", default=1.0, soft_min=0.0, soft_max=10.0, get=get_exhaust, set=set_exhaust)
-    sheath: BoolProperty(name="Sheath", default=True, get=get_sheath, set=set_sheath)
-    wet: BoolProperty(name="Wet", default=False, get=get_wet, set=set_wet)
-    file_path: StringProperty(
-        name="Pose file", 
-        default='c:\\temp\\pose.txt', 
-        description="Pose file"
-    )
+    mouth_open: FloatProperty(name="Mouth open", min=0, max=100, description="Mouth open", get=get_mouth_open, set=set_mouth_open)
+    ik: WrapProperty(BoolProperty,'IK')
+    hair_color: WrapProperty(FloatVectorProperty, "Hair color", subtype='COLOR', min=0.0, max=1.0)
+    eye_color: WrapProperty(FloatVectorProperty, "Eye color", subtype='COLOR', min=0.0, max=1.0)
+    skin_tone: WrapProperty(FloatVectorProperty, "Skin tone", subtype='COLOR', min=0.0, max=1.0)
+    eagerness: WrapProperty(FloatProperty, "Eagerness", soft_min=0.0, soft_max=100.0, step=1)
+    length: WrapProperty(FloatProperty, "Length", soft_min=0.0, soft_max=100.0, step=1)
+    girth: WrapProperty(FloatProperty, "Girth", soft_min=0.0, soft_max=100.0, step=1)
+    volume: WrapProperty(FloatProperty, "Volume", soft_min=0.0, soft_max=100.0, step=1)
+    exhaust: WrapProperty(FloatProperty, "Exhaust", soft_min=0.0, soft_max=10.0, store=False)
+    sheath: WrapProperty(BoolProperty, "Sheath")
+    wet: WrapProperty(BoolProperty, "Wet", store=False)
+    neuter: WrapProperty(BoolProperty, "Neuter", store=False)
 
     command: StringProperty(
         name="Command", 
@@ -631,10 +602,6 @@ class hs2rig_props(PropertyGroup):
  
     def execute(self, context):
         return {'FINISHED'}
-
-    #def poll(self, context):
-    #    print("Poll")
-    #    return {'FINISHED'}
 
 
 def finger_curl(x):
@@ -649,7 +616,7 @@ def set_fixed_pose(context, pose):
         arm = arm.parent
     if arm.type!='ARMATURE':
         return
-    set_ik(arm, False)
+    attributes.set_attr("IK", False)
     v=[]
     if isinstance(pose, int):
         v = standard_pose_list[pose][1][:]
@@ -665,6 +632,8 @@ def set_fixed_pose(context, pose):
     # todo: clear all bones
     deformed_rig = arm["deformed_rig"]
     for x in arm.pose.bones:
+        if x.name in ['balls','stick_01','stick_02','stick_03','stick_04','tip_base','fskin_bottom','fskin_top','fskin_left','fskin_right','sheath']:
+            continue
         if x.name in deformed_rig and armature.bone_class(x.name, 'rotation')=='f':
             default_rig = Matrix(deformed_rig[x.name]).decompose()
             current_rig = x.matrix_basis.decompose()
@@ -698,79 +667,62 @@ class hs2rig_OT_execute(Operator):
     bl_description = ""
     bl_options = {'REGISTER', 'UNDO'}
     def execute(self, context):
-        if context.scene.hs2rig_data.command == "eyelid_crease":
-            arm = hs2object()
-            if arm is not None:
-                for y in arm.children:
-                    if y.type=='MESH' and "pore_density" in y:
-                        save_object = bpy.context.view_layer.objects.active
-                        try:
-                            add_extras.eyelid_crease(y)
-                        except:
-                            pass
-                        bpy.context.view_layer.objects.active = save_object
-
-        #load_pose(context.active_object.name, context.scene.hs2rig_data.file_path, 1)
+        arm = hs2object()
+        if arm is not None:
+            getattr(add_extras, context.scene.hs2rig_data.command)(arm, arm["body"])
         return {'FINISHED'}
 
-class hs2rig_OT_load_fk(Operator):
-    bl_idname = "object.load_pose_fk"
-    bl_label = "Load pose"
-    bl_description = "Loads the character pose from the file"
+class hs2rig_OT_reset_cust(Operator):
+    bl_idname = "object.reset_customization"
+    bl_label = "Reset shape to vanilla"
+    bl_description = "Resets the character shape to the original export"
     bl_options = {'REGISTER', 'UNDO'}
     def execute(self, context):
-        load_pose(context.active_object.name, context.scene.hs2rig_data.file_path, 1)
+        h = hs2object()
+        for p in preset_map:
+            print(preset_map[p])
+            if preset_map[p]["uuid"]==h["preset_uuid"]:
+                importer.reset_customization(h)
+                armature.set_drivers(h)
         return {'FINISHED'}
 
-class hs2rig_OT_load_shape(Operator):
-    bl_idname = "object.load_pose_soft"
-    bl_label = "Load shape"
-    bl_description = "Loads the character shape from the file"
+class hs2rig_OT_load_cust(Operator):
+    bl_idname = "object.load_from_customization"
+    bl_label = "Load shape from preset"
+    bl_description = "Loads the character shape from the preset"
     bl_options = {'REGISTER', 'UNDO'}
     def execute(self, context):
-        load_pose(context.active_object.name, context.scene.hs2rig_data.file_path, 2)
+        h = hs2object()
+        p = find_preset(h)
+        if p is not None:
+            importer.load_customization_from_string(h, p.get("customization") or "")
+            armature.set_drivers(h)
         return {'FINISHED'}
 
-class hs2rig_OT_load_all(Operator):
-    bl_idname = "object.load_pose_all"
-    bl_label = "Load all"
-    bl_description = "Loads the character pose and shape from the file"
+class hs2rig_OT_save_cust(Operator):
+    bl_idname = "object.save_to_customization"
+    bl_label = "Save shape to preset"
+    bl_description = "Saves the character shape to the preset"
     bl_options = {'REGISTER', 'UNDO'}
     def execute(self, context):
-        load_pose(context.active_object.name, context.scene.hs2rig_data.file_path, 7)
+        h = hs2object()
+        s = importer.customization_string(h, "cf_N_height")
+        p = find_preset(h)
+        if p is not None:
+            p["customization"]=s
         return {'FINISHED'}
 
-class hs2rig_OT_save_fk(Operator):
-    bl_idname = "object.save_pose_fk"
-    bl_label = "Save pose"
-    bl_description = "Saves the character pose to the file"
+class hs2rig_OT_name_to_preset(Operator):
+    bl_idname = "object.name_to_preset"
+    bl_label = "Save name to preset"
+    bl_description = "Saves the character name to the preset"
     bl_options = {'REGISTER', 'UNDO'}
     def execute(self, context):
-        of=open(context.scene.hs2rig_data.file_path,"w")
-        dump_pose(context.active_object.name, of, flags=1)
-        of.close()
-        return {'FINISHED'}
-
-class hs2rig_OT_save_soft(Operator):
-    bl_idname = "object.save_pose_soft"
-    bl_label = "Save shape"
-    bl_description = "Saves the character shape to the file"
-    bl_options = {'REGISTER', 'UNDO'}
-    def execute(self, context):
-        of=open(context.scene.hs2rig_data.file_path,"w")
-        dump_pose(context.active_object.name, of, flags=2)
-        of.close()
-        return {'FINISHED'}
-
-class hs2rig_OT_save_all(Operator):
-    bl_idname = "object.save_pose_all"
-    bl_label = "Save all"
-    bl_description = "Saves the character pose and shape to the file"
-    bl_options = {'REGISTER', 'UNDO'}
-    def execute(self, context):
-        of=open(context.scene.hs2rig_data.file_path,"w")
-        dump_pose(context.active_object.name, of)
-        of.close()
+        print("save_name_to_preset")
+        h = hs2object()
+        p = find_preset(h)
+        if p is not None:
+            p.name = h["Name"]
         return {'FINISHED'}
 
 #
@@ -810,65 +762,173 @@ class hs2rig_OT_clothing(Operator):
             x.hide_viewport = not x.hide_viewport
         return {'FINISHED'}
 
-class hs2rig_OT_import(Operator):
-    bl_idname = "object.import"
-    bl_label = "Import model"
-    bl_description = "Import model"
+class hs2rig_OT_load_preset_character(Operator):
+    bl_idname = "object.load_preset_character"
+    bl_label = "Load preset character"
+    bl_description = "Load preset character"
     bl_options = {'REGISTER', 'UNDO'}
     
     def execute(self, context):
         print("trying to import...")
-        importer.import_body(context.scene.hs2rig_data.dump_dir, 
-            refactor=context.scene.hs2rig_data.refactor, 
-            do_tweak_mouth=context.scene.hs2rig_data.tweak_mouth, 
-            do_tweak_cheeks=context.scene.hs2rig_data.tweak_cheeks, 
-            replace_teeth=context.scene.hs2rig_data.replace_teeth, 
-            add_injector=context.scene.hs2rig_data.add_injector, 
-            add_exhaust=context.scene.hs2rig_data.add_exhaust, 
-            wipe=context.scene.hs2rig_data.wipe, 
-            c_eye=context.scene.hs2rig_data.preset_eye_color, 
-            c_hair=context.scene.hs2rig_data.preset_hair_color,
-            name=context.scene.hs2rig_data.char_name
+        preset = None
+        uuid = None
+        name = ""
+        preset = preset_map[int(bpy.context.scene.hs2rig_data.presets)]
+        eye_color = preset.eye_color
+        hair_color = preset.hair_color
+        uuid = preset["uuid"]
+        name = preset.name
+
+        arm=importer.import_body(preset.get_path(),
+            refactor=context.scene.hs2rig_data.refactor,
+            do_extend_safe=context.scene.hs2rig_data.extend_safe,
+            do_extend_full=context.scene.hs2rig_data.extend_full,
+            replace_teeth=context.scene.hs2rig_data.replace_teeth,
+            add_injector=context.scene.hs2rig_data.add_injector,
+            add_exhaust=context.scene.hs2rig_data.add_exhaust,
+            wipe=context.scene.hs2rig_data.wipe,
+            c_eye=eye_color,
+            c_hair=hair_color,
+            name=name,
+            customization=preset.get("customization")
+            )
+        if uuid is not None:
+            arm["preset_uuid"] = uuid
+        bpy.context.scene.hs2rig_data.standard_poses="T"
+        if preset is not None:
+            attributes.push_mat_attributes(preset)
+        return {'FINISHED'}
+
+class DirSelector(Operator):
+    bl_options = {'REGISTER', 'UNDO'}
+    filepath: bpy.props.StringProperty(subtype="DIR_PATH")
+    def invoke(self, context, event):
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
+class FileSelector(Operator):
+    bl_options = {'REGISTER', 'UNDO'}
+    filepath: bpy.props.StringProperty(subtype="FILE_PATH")
+    def invoke(self, context, event):
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
+class hs2rig_OT_load(FileSelector):
+    def execute(self, context):
+        print("self.filepath", self.filepath, "self.flags", self.flags)
+        load_pose(context.active_object.name, self.filepath, self.flags)
+        return {'FINISHED'}
+
+class hs2rig_OT_save(FileSelector):
+    def execute(self, context):
+        try:
+            of=open(self.filepath,"w")
+            dump_pose(context.active_object.name, of, self.flags)
+            of.close()
+        except:
+            pass
+        return {'FINISHED'}
+
+class hs2rig_OT_load_fk(hs2rig_OT_load):
+    bl_idname = "object.load_pose_fk"
+    bl_label = "Load pose from file"
+    bl_description = "Loads the character pose from the file"
+    flags = 1
+
+class hs2rig_OT_load_shape(hs2rig_OT_load):
+    bl_idname = "object.load_pose_soft"
+    bl_label = "Load shape from file"
+    bl_description = "Loads the character shape from the file"
+    flags = 2
+
+class hs2rig_OT_load_all(hs2rig_OT_load):
+    bl_idname = "object.load_pose_all"
+    bl_label = "Load armature from file"
+    bl_description = "Loads the character pose and shape from the file"
+    flags = 7
+
+class hs2rig_OT_save_fk(hs2rig_OT_save):
+    bl_idname = "object.save_pose_fk"
+    bl_label = "Save pose to file"
+    bl_description = "Saves the character pose to the file"
+    flags = 1
+
+class hs2rig_OT_save_shape(hs2rig_OT_save):
+    bl_idname = "object.save_pose_soft"
+    bl_label = "Save shape to file"
+    bl_description = "Saves the character shape to the file"
+    flags = 2
+
+class hs2rig_OT_save_all(hs2rig_OT_save):
+    bl_idname = "object.save_pose_all"
+    bl_label = "Save armature to file"
+    bl_description = "Saves the character pose and shape to the file"
+    flags = 3
+
+
+class hs2rig_OT_import(DirSelector):
+    bl_idname = "object.import"
+    bl_label = "Import new dump"
+    bl_description = "Import new dump"
+
+    def execute(self, context):
+        print("trying to import...")
+        preset = None
+        uuid = None
+        eye_color = (0.0, 0.0, 0.8)
+        hair_color = (0.8, 0.8, 0.5)
+
+        arm=importer.import_body(self.filepath,
+            refactor=context.scene.hs2rig_data.refactor,
+            do_extend_safe=context.scene.hs2rig_data.extend_safe,
+            do_extend_full=context.scene.hs2rig_data.extend_full,
+            replace_teeth=context.scene.hs2rig_data.replace_teeth,
+            add_injector=context.scene.hs2rig_data.add_injector,
+            add_exhaust=context.scene.hs2rig_data.add_exhaust,
+            wipe=context.scene.hs2rig_data.wipe,
+            c_eye=eye_color,
+            c_hair=hair_color,
+            name = os.path.basename(self.filepath),
+            customization = None
             )
         bpy.context.scene.hs2rig_data.standard_poses="T"
         return {'FINISHED'}
 
 class hs2rig_OT_import_all(Operator):
     bl_idname = "object.import_all"
-    bl_label = "Import all models"
-    bl_description = "Import all models"
+    bl_label = "Load all preset characters"
+    bl_description = "Load all preset characters"
     bl_options = {'REGISTER', 'UNDO'}
     
     def execute(self, context):
         print("trying to import...")
         count = 0
         for value in preset_map:
-            name, path, eye_color, hair_color, _ = preset_map[value]
-            if path[0]!='/':
-                path=waifus_path+path
-            else:
-                path=path[1:]
-            bpy.context.scene.hs2rig_data.dump_dir = path
-            bpy.context.scene.hs2rig_data.preset_eye_color = eye_color
-            bpy.context.scene.hs2rig_data.preset_hair_color = hair_color
-
-            arm = importer.import_body(path,
-                refactor=context.scene.hs2rig_data.refactor, 
-                do_tweak_mouth=context.scene.hs2rig_data.tweak_mouth,
-                do_tweak_cheeks=context.scene.hs2rig_data.tweak_cheeks,
+            preset = preset_map[value]
+            eye_color = preset.eye_color
+            hair_color = preset.hair_color
+            arm = importer.import_body(preset.get_path(),
+                refactor=context.scene.hs2rig_data.refactor,
+                do_extend_safe=context.scene.hs2rig_data.extend_safe,
+                do_extend_full=context.scene.hs2rig_data.extend_full,
                 replace_teeth=context.scene.hs2rig_data.replace_teeth,
-                add_injector=None,
+                add_injector=context.scene.hs2rig_data.add_injector,
                 add_exhaust=context.scene.hs2rig_data.add_exhaust,
-                wipe=False,
-                c_eye=eye_color,
-                c_hair=hair_color,
-                name=name
+                wipe=context.scene.hs2rig_data.wipe,
+                c_eye=preset.eye_color,
+                c_hair=preset.hair_color,
+                name=preset.name,
+                customization=preset.get("customization")
                 )
+
             if arm is not None:
                 arm.location = Vector([count, 0, 0])
                 count+=1
+            if "uuid" in preset_map[value]:
+                arm["preset_uuid"] = preset_map[value]["uuid"]
 
-        bpy.context.scene.hs2rig_data.standard_poses="T"
+            attributes.push_mat_attributes(preset_map[value])
+            bpy.context.scene.hs2rig_data.standard_poses="T"
         return {'FINISHED'}
 
 class hs2rig_OT_reload_presets(Operator):
@@ -879,6 +939,15 @@ class hs2rig_OT_reload_presets(Operator):
     
     def execute(self, context):
         load_presets()
+        return {'FINISHED'} 
+
+class hs2rig_OT_select_export_dir(Operator):
+    bl_idname = "object.select_export_dir"
+    bl_label = "select_export_dir"
+    bl_description = ""
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def execute(self, context):
         return {'FINISHED'} 
 
 
@@ -892,39 +961,36 @@ class hs2rig_OT_save_presets(Operator):
         save_presets()
         return {'FINISHED'} 
 
-"""
-class hs2rig_OT_import_preset(Operator):
-    bl_idname = "object.import_preset"
-    bl_label = "Import preset"
-    bl_description = "Import preset"
+class hs2rig_OT_add_new_preset(Operator):
+    bl_idname = "object.add_new_preset"
+    bl_label = "Add as a new preset"
+    bl_description = "Save current entries as a new preset"
     bl_options = {'REGISTER', 'UNDO'}
     
     def execute(self, context):
-        print("trying to import...")
-        #self['presets']=value
-        value = int(context.scene.hs2rig_data.presets)
-        print("Value", value)
-        #print(preset_map)
-        if value in preset_map:
-            name, path, eye_color, hair_color = preset_map[value]
-            print(path)
-            importer.import_body(path, context.scene.hs2rig_data.refactor, 
-                context.scene.hs2rig_data.tweak_mouth, 
-                context.scene.hs2rig_data.tweak_cheeks, 
-                context.scene.hs2rig_data.add_extra, 
-                context.scene.hs2rig_data.wipe, 
-                eye_color, hair_color,
-                name)
-            print('Done')
-        else:
-            print('Not in the map')
+        add_new_preset(hs2object())
         return {'FINISHED'} 
-"""
 
-#@classmethod
-#def main(context):
-#    print("execute")
+class hs2rig_OT_delete_preset(Operator):
+    bl_idname = "object.delete_preset"
+    bl_label = "Delete preset"
+    bl_description = "Delete current preset"
+    bl_options = {'REGISTER', 'UNDO'}
     
+    def execute(self, context):
+        delete_preset()
+        return {'FINISHED'}
+
+class hs2rig_OT_reset_skin_tone(Operator):
+    bl_idname = "object.reset_skin_tone"
+    bl_label = "Reset"
+    bl_description = "Reset the skin to default export value"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def execute(self, context):
+        attributes.reset_skin_tone()
+        return {'FINISHED'} 
+
 class HS2RIG_PT_ui(Panel):
     bl_idname = "HS2RIG_PT_ui"
     bl_label = "HS2 rig"
@@ -934,7 +1000,6 @@ class HS2RIG_PT_ui(Panel):
     bl_context = ""
     bl_options = {'DEFAULT_CLOSED'}
 
-
     def draw(self, context):
         layout = self.layout
         scene = context.scene
@@ -943,143 +1008,157 @@ class HS2RIG_PT_ui(Panel):
             arm = arm.parent
 
         if arm is not None and arm.type == 'ARMATURE' and arm.get("default_rig")!=None:
-            box = layout.box()    
+            preset = find_preset(arm)
+            box = layout.box()
             box.prop(context.scene.hs2rig_data, "standard_poses")
-            #row = box.row(align=True)
-            #row.operator("object.save_preset")
-            #row.enabled=False
-            #row = box.row(align=True)
-            #row.operator("object.standard_pose")
-            """
             row = layout.row(align=True)
-            row.operator("object.set_pose")
-            row.operator("object.set_pose2")
-            row.operator("object.set_pose3")
-            row.operator("object.set_pose4")
-            row.operator("object.set_pose5")
-            """
-            row = layout.row(align=True)
-            #row.operator("object.apply_scale")
             row.operator("object.toggle_clothing")
             row = layout.row(align=True)
             row.prop(context.scene.hs2rig_data, "finger_curl_scale", slider=True)
-                #row = layout.row(align=True)
-            row.prop(context.scene.hs2rig_data, "exhaust")
-            #row.prop(context.scene.hs2rig_data, "custom_geo", slider=True)
-            #row.prop(context.scene.hs2rig_data, "daisy_protocol", slider=True)
+            row.prop(context.scene.hs2rig_data, "mouth_open", slider=True)
+            if not context.scene.hs2rig_data.neuter:
+                row.prop(context.scene.hs2rig_data, "exhaust")
             if arm.type == 'ARMATURE' and ('stick_01' in arm.pose.bones):
-                try:
-                    row = layout.row(align=True)
-                    row.prop(context.scene.hs2rig_data, "eagerness")
-                    row.prop(context.scene.hs2rig_data, "length")
-                    row = layout.row(align=True)
-                    row.prop(context.scene.hs2rig_data, "girth")
-                    row.prop(context.scene.hs2rig_data, "volume")
-                    row = layout.row(align=True)
-                    row.prop(context.scene.hs2rig_data, "wet")
-                    row.prop(context.scene.hs2rig_data, "sheath")
-                except:
-                    print('Failed to add stick controls')
-            row = layout.row(align=True)
-            row.prop(context.scene.hs2rig_data, "ik")
-            row = layout.row(align=True)
-            #row.prop(context.scene.hs2rig_data, "command")
-            #row.operator("object.execute_command")
+                if not context.scene.hs2rig_data.neuter:
+                    row1 = layout.row(align=True)
+                    row1.prop(context.scene.hs2rig_data, "eagerness")
+                    row1.prop(context.scene.hs2rig_data, "length")
+                    row2 = layout.row(align=True)
+                    row2.prop(context.scene.hs2rig_data, "girth")
+                    row2.prop(context.scene.hs2rig_data, "volume")
+                row3 = layout.row(align=True)
+                row3.prop(context.scene.hs2rig_data, "ik")
+                row3.prop(context.scene.hs2rig_data, "neuter")
+                if not context.scene.hs2rig_data.neuter:
+                    row3.prop(context.scene.hs2rig_data, "wet")
+                    row3.prop(context.scene.hs2rig_data, "sheath")
+            else:
+                row = layout.row(align=True)
+                row.prop(context.scene.hs2rig_data, "ik")
+
+            if analyzer_enabled:
+                row = layout.row(align=True)
+                row.prop(context.scene.hs2rig_data, "command")
+                row.operator("object.execute_command")
         
             row = layout.row(align=True)
-            row.prop(context.scene.hs2rig_data, "file_path")
+            box = layout.box()
+
             row = layout.row(align=True)
+            row.operator("object.reset_customization")
+            row = layout.row(align=True)
+            op = row.operator("object.load_from_customization")
+            op = row.operator("object.save_to_customization")
+            if preset is None:
+                row.enabled = False
+
+            #box.prop(context.scene.hs2rig_data, "file_path")
+            row = box.row(align=True)
             row.operator("object.load_pose_fk")
-            row.operator("object.load_pose_soft")
-            row.operator("object.load_pose_all")
             row.operator("object.save_pose_fk")
+            row = box.row(align=True)
+            row.operator("object.load_pose_soft")
             row.operator("object.save_pose_soft")
+            row = box.row(align=True)
+            row.operator("object.load_pose_all")
             row.operator("object.save_pose_all")
-            
-            #row.operator("object.load_unity")
-        if (arm is not None) and (arm.get("hair_color") is not None):
+
             box = layout.box()
             row = box.row(align=True)
-            #global hair_color
-            #if hair_color is None:
-            hair_color = arm["hair_color"]
-            eye_color = arm["eye_color"]
-            try:
-                #if not 'hair_color' in dir(arm):
-                #    arm.hair_color = FloatVectorProperty(name="Hair color", default=hair_color[:3], subtype='COLOR', min=0.0, max=1.0, get=get_hair_color, set=set_hair_color)
-                #    arm.eye_color = FloatVectorProperty(name="Eye color", default=eye_color[:3], subtype='COLOR', min=0.0, max=1.0, get=get_eye_color, set=set_eye_color)                
-                row.prop(context.scene.hs2rig_data, "hair_color")
-                row.prop(context.scene.hs2rig_data, "eye_color")
-            except:
-                print('Failed to add color controls')
+            row.prop(context.scene.hs2rig_data, "char_name")
+            subbox = row.box()
+            op = subbox.operator("object.name_to_preset")
+            if preset is None:
+                subbox.enabled = False
+            row = box.row(align=True)
+            row.prop(context.scene.hs2rig_data, "hair_color")
+            row.prop(context.scene.hs2rig_data, "eye_color")
+            row = box.row(align=True)
+            row.prop(context.scene.hs2rig_data, "skin_tone")
+            row.operator("object.reset_skin_tone")
+            row = box.row(align=True)
+            row.operator("object.add_new_preset")
 
         box = layout.box()
         box.label(text="System settings")
         box.prop(context.scene.hs2rig_data, "export_dir")
+        #params=bpy.data.FileSelectParams.new()
+        #box.operator("object.select_export_dir")
         box.prop(context.scene.hs2rig_data, "presets")
         row = box.row(align=True)
-        b = row.box()
-        op = b.operator("object.reload_presets")
-        if not presets_dirty:
-            b.enabled = False
-        b = row.box()
-        op = b.operator("object.save_presets")
-        if not presets_dirty:
-            b.enabled = False
-        #row.enabled=False
+        #b = row.box()
+        row.operator("object.reload_presets")
+        row.operator("object.save_presets")
+        row.operator("object.delete_preset")
+        if len(preset_map)==0:
+            row.enabled=False
         row = box.row(align=True)
-        #row.operator("object.import_preset")
-        #print(context.scene.hs2rig_data.presets)
-        #if not (int(context.scene.hs2rig_data.presets) in preset_map):
-        #    row.enabled=False
+        row.operator("object.load_preset_character")
+        row.operator("object.import_all")
+        if len(preset_map)==0:
+            row.enabled=False
 
-        box = box.box()
-        #box.label(text="Character import")
-        box.prop(context.scene.hs2rig_data, "dump_dir")
-        row = box.row(align=True)
-        row.prop(context.scene.hs2rig_data, "char_name")
-        row = box.row(align=True)
-        row.prop(context.scene.hs2rig_data, "preset_hair_color")
-        row.prop(context.scene.hs2rig_data, "preset_eye_color")
+        if analyzer_enabled:
+            row = box.row(align=True)
+            row.prop(context.scene.hs2rig_data, "run_analyzer")
+
         row = box.row(align=True)
         row.prop(context.scene.hs2rig_data, "wipe")
         row.prop(context.scene.hs2rig_data, "refactor")
-        row = box.row(align=True)
-        row.prop(context.scene.hs2rig_data, "tweak_mouth")
-        row.prop(context.scene.hs2rig_data, "tweak_cheeks")
-        row = box.row(align=True)
-        row.prop(context.scene.hs2rig_data, "add_injector")
-        row.prop(context.scene.hs2rig_data, "add_exhaust")
-        row.prop(context.scene.hs2rig_data, "replace_teeth")
+        if context.scene.hs2rig_data.refactor:
+            row = box.row(align=True)
+            row.prop(context.scene.hs2rig_data, "replace_teeth")
+            row = box.row(align=True)
+            row.prop(context.scene.hs2rig_data, "extend_safe")
+            if context.scene.hs2rig_data.extend_safe:
+                row.prop(context.scene.hs2rig_data, "extend_full")
+            row = box.row(align=True)
+            op=row.prop_menu_enum(context.scene.hs2rig_data, "add_injector")
+            op=row.prop(context.scene.hs2rig_data, "add_exhaust")
         row = box.row(align=True)
         row.operator("object.import")
-        row.operator("object.import_all")
         row = box.row(align=True)
         row.label(text=importer.last_import_status)
+        if analyzer_enabled and context.scene.hs2rig_data.run_analyzer:
+            analyzer.analyzer(hs2object())
+            if len(analyzer.analyzer_report)>0:
+                v=analyzer.analyzer_report.split('\n')
+                for y in v:
+                    row = box.row(align=True)
+                    row.label(text=y)
 
 addon_classes=[
+HS2RIG_PT_ui, 
+
 #hs2rig_OT_standard_posing,
 hs2rig_OT_clothing,
 hs2rig_OT_load_fk,
 hs2rig_OT_load_shape,
 hs2rig_OT_load_all,
 hs2rig_OT_save_fk,
-hs2rig_OT_save_soft,
+hs2rig_OT_save_shape,
 hs2rig_OT_save_all,
+hs2rig_OT_save_cust,
+hs2rig_OT_load_cust,
+hs2rig_OT_reset_cust,
 hs2rig_OT_import,
 hs2rig_OT_import_all,
 hs2rig_OT_save_presets,
 hs2rig_OT_reload_presets,
-#hs2rig_OT_import_preset,
-HS2RIG_PT_ui, 
+hs2rig_OT_add_new_preset,
+hs2rig_OT_delete_preset,
+hs2rig_OT_reset_skin_tone,
+hs2rig_OT_name_to_preset,
+hs2rig_OT_load_preset_character,
 hs2rig_props,
 hs2rig_OT_execute,
+#hs2rig_OT_select_export_dir,
 ]
 
 def unregister():
     for x in addon_classes: 
         try:
-            bpy.utils.unregister_class(x)    
+            bpy.utils.unregister_class(x)
         except:
             pass
     
@@ -1090,7 +1169,7 @@ def register():
 
     for x in addon_classes: 
         bpy.utils.register_class(x)
-        
+    last_preset = None
     bpy.types.Scene.hs2rig_data = PointerProperty(type=hs2rig_props)
     print("Registering...")
     import importlib
@@ -1098,5 +1177,8 @@ def register():
     importlib.reload(attributes)
     importlib.reload(importer)
     importlib.reload(armature)
+    try:
+        importlib.reload(analyzer)
+    except:
+        pass
     importlib.reload(solve_for_deform)
-
