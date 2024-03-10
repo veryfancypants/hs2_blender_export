@@ -34,6 +34,29 @@ def score_deform(b, depsgraph, undeformed, active_set):
     bm.free()
     return errors
 
+def build_np_map(v_in,v_out):
+    assert len(v_in)==len(v_out)
+    N=len(v_in)
+    np_v_in = (np.array(v_in)*100000.).astype(np.int64)
+    np_v_in = np_v_in[:,0]+1000000*np_v_in[:,1]+1000000*1000000*np_v_in[:,2]
+    np_map = np.zeros([N,2],dtype=np.int64)
+    #np_map_out = np.zeros([N,3],dtype=float)
+    np_map[:,0] = np_v_in
+    np_map[:,1]=np.arange(N)
+    np_map_out = np.array(v_out, dtype=float)
+    order = np.argsort(np_map, axis=0)
+    np_map = np_map[order[:,0]]
+    return np_map, np_map_out
+
+def np_solve(seq, np_map, np_map_out):
+    iseq = (seq*100000.).astype(int).reshape([-1,3])
+    iseq = iseq[:,0]+1000000*iseq[:,1]+1000000*1000000*iseq[:,2]
+    indexes = np.searchsorted(np_map[:,0], iseq)
+    hits = (np_map[indexes,0] == iseq)
+    indexes2 = np_map[indexes,1]
+    coords = np_map_out[indexes2,:].reshape([-1])
+    return coords, np.where(hits^True)
+
 def try_load_solution_cache(path, b, expected_hash):
     try:
         f=open(path+"solution.cache","rb")
@@ -49,7 +72,6 @@ def try_load_solution_cache(path, b, expected_hash):
         return False, {}
     buf=struct.unpack('%si' % (len(buf)//4), buf)
     map={}
-    map2={}
     np_map = np.zeros([len(buf)//6,2],dtype=np.int64)
     np_map_out = np.zeros([len(buf)//6,3],dtype=float)
     for x in range(len(buf)//6):
@@ -57,7 +79,6 @@ def try_load_solution_cache(path, b, expected_hash):
         v2=from_int(buf[x*6+3:x*6+6])
         map[v1]=v2
         index=v1[0]+1000000*v1[1]+1000000*1000000*v1[2]
-        map2[index]=v2
         np_map[x,0]=index
         np_map[x,1]=x
         np_map_out[x,:]=v2
@@ -71,9 +92,21 @@ def try_load_solution_cache(path, b, expected_hash):
                 local_unsolved=0
                 source=bpy.data.objects[x["ref"]].data.shape_keys.key_blocks[k].data
                 target=x.data.shape_keys.key_blocks[k].data
-
                 seq = np.zeros([len(source)*3], dtype=float)
                 source.foreach_get("co", seq)
+                coords, failures = np_solve(seq, np_map, np_map_out)
+                solved += len(source)-len(failures)
+                for y in failures:
+                    v = to_int(source[y])
+                    if v in map:
+                        coords[y]=map[v]
+                        solved+=1
+                    else:
+                        unsolved+=1
+                        local_unsolved+=1
+                target.foreach_set("co", coords)
+
+                """
                 iseq =(seq*100000.).astype(int).reshape([-1,3])
                 iseq = iseq[:,0]+1000000*iseq[:,1]+1000000*1000000*iseq[:,2]
 
@@ -94,6 +127,7 @@ def try_load_solution_cache(path, b, expected_hash):
                     else:
                         unsolved+=1
                         local_unsolved+=1
+                """
                 if local_unsolved>0:
                     print(local_unsolved, "unsolved verts in", x, "shape key", k)
         else:
@@ -157,7 +191,7 @@ def save_solution_cache(path, b, hash):
 
 # Given an object 'b' that is parented to an armature in a nontrivial pose, and a reference
 # object with the same number of vertices, deforms the rest position of 'b' until it matches 'b2' in pose position.
-def solve_for_deform(b, b2, shape_key=None, counter=None, scale=Vector([1,1,1]), map={}):
+def solve_for_deform(b, b2, shape_key=None, counter=None, scale=Vector([1,1,1]), map={}, np_map=None, np_map_out=None):
     npass=0
     nfail=0
     if shape_key is None:
@@ -175,7 +209,7 @@ def solve_for_deform(b, b2, shape_key=None, counter=None, scale=Vector([1,1,1]),
         basis=b.data.shape_keys.key_blocks['Basis'].data
         undeformed_basis=b2.data.shape_keys.key_blocks['Basis'].data
         if shape_key==None:
-            ps, fail=solve_for_deform(b, b2, 'Basis', map=map)
+            ps, fail, np_map, np_map_out = solve_for_deform(b, b2, 'Basis', map=map, np_map=np_map, np_map_out=np_map_out)
             npass = ps
             nfail = fail
             c=0
@@ -187,7 +221,7 @@ def solve_for_deform(b, b2, shape_key=None, counter=None, scale=Vector([1,1,1]),
             for x in b.data.shape_keys.key_blocks:
                 if x.name=='Basis':
                     continue
-                ps, fail=solve_for_deform(b, b2, x.name, c, scale, map=map)
+                ps, fail, np_map, np_map_out = solve_for_deform(b, b2, x.name, c, scale, map=map, np_map=np_map, np_map_out=np_map_out)
                 npass+=ps
                 nfail+=fail
                 c+=1
@@ -221,6 +255,17 @@ def solve_for_deform(b, b2, shape_key=None, counter=None, scale=Vector([1,1,1]),
     bpy.ops.object.mode_set(mode='OBJECT')  
     n = min(len(target), len(undeformed))
     # return (int(v.co[0]*100000.), int(v.co[1]*100000.), int(v.co[2]*100000.))
+
+    #np_map, np_map_out = build_np_map(v_in, v_out)
+
+    #source=bpy.data.objects[x["ref"]].data.shape_keys.key_blocks[k].data
+    #target=x.data.shape_keys.key_blocks[k].data
+
+    if np_map is not None:
+        seq = np.zeros([len(undeformed)*3], dtype=float)
+        undeformed.foreach_get("co", seq)
+        coords, failures = np_solve(seq, np_map, np_map_out)
+
     ui = [x.co for x in undeformed]
     ui = (np.array(ui)*100000.).astype(int)
     for x in range(n):
@@ -362,4 +407,4 @@ def solve_for_deform(b, b2, shape_key=None, counter=None, scale=Vector([1,1,1]),
                 print("Reenabling the subsurface modifier on ", b)
                 #mod.show_viewport=True
                 mod.show_render=True
-    return npass, n-sum(solved)
+    return npass, n-sum(solved), np_map, np_map_out

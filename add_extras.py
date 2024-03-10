@@ -731,6 +731,8 @@ def eyelid_crease(arm, body, bm, on=True):
 
 
 def forehead_flatten(arm, body, bm, on=True):
+    if not "cf_J_FaceUp_tz" in body.vertex_groups:
+        return
     ftz_id = body.vertex_groups["cf_J_FaceUp_tz"].index
     def formula(uv, vert, norm, co, **kwargs):
         #w = get_weight(body, vert, ftz_id)

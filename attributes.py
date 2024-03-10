@@ -261,6 +261,7 @@ def collect_mat_attributes():
 
     def pull_input_attr(v, mat, name, node, input_name):
         val = mat.node_tree.nodes[node].inputs[input_name].default_value
+        print(mat, name, val)
         v[name] =val
 
     v={}
@@ -279,6 +280,7 @@ def collect_mat_attributes():
         pull_input_attr(v, torso_mat, "Torso bump scale 2", "Shader", "Bump scale 2")
 
         nails_mat = h["body"]["nails_mat"]
+        print("nails_mat", nails_mat)
         pull_input_attr(v, nails_mat, "Nail color", "Principled BSDF", "Base Color")
 
         eye_mat = h["body"]["eye_mat"]

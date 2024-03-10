@@ -673,26 +673,6 @@ def import_bodyparts(fbx, wipe_scene):
     #bpy.ops.object.scale_clear()
     return True, arm, body
 
-def disable_extra_bones(arm):
-    ns = arm.pose.bones["cf_J_NoseBase_trs"].scale 
-    arm.pose.bones["cf_J_NoseBase_s"].location += arm.pose.bones["cf_J_NoseBase_trs"].location
-    arm.pose.bones["cf_J_NoseBase_s"].scale *= ns
-    arm.pose.bones["cf_J_NoseBridge_t"].location += arm.pose.bones["cf_J_NoseBase_trs"].location - Vector([0,0.31,0.11])*(scale-Vector([1,1,1]))
-    arm.pose.bones["cf_J_NoseBridge_t"].scale *= ns
-    arm.pose.bones["cf_J_NoseBase_trs"].location = Vector([0,0,0])
-    arm.pose.bones["cf_J_NoseBase_trs"].scale = Vector([1,1,1])
-
-    """
-    # probably requires slight tweaks to offsets
-    arm.pose.bones["cf_J_Head_s"].scale *= arm.pose.bones["cf_J_FaceBase_s"].scale
-    for k in range(3):
-        arm.pose.bones["cf_J_FaceRoot_s"].scale[k] /= arm.pose.bones["cf_J_FaceBase_s"].scale[k]
-    arm.pose.bones["cf_J_FaceBase_s"].scale = Vector([1,1,1])
-    """
-
-    # lock and hide away disabled bones
-    # update rig table
-
 def save_with_backup(s, fn):
     backup_path = fn + ".bak"
     current_md5 = None
@@ -885,6 +865,7 @@ def load_customization(arm, custfn):
     load_customization_from_string(arm, f.decode('utf-8'))
 
 def fix_neck_loop(body):
+    return
     bpy.ops.object.mode_set(mode='OBJECT')
     bpy.context.view_layer.objects.active = body
     bmd = bmesh.new()
@@ -1063,6 +1044,11 @@ def import_body(input, refactor,
 
         if add_injector is None:
             add_injector = male
+            for b in arm.pose.bones:
+                if 'cm_J_dan' in b.name:
+                    # has an injector, don't attempt to sew on another
+                    add_injector = False
+                    break
         if add_injector:
             if refactor:
                 print("Trying to attach the injector")
@@ -1072,35 +1058,37 @@ def import_body(input, refactor,
         if add_exhaust and refactor:
             add_extras.attach_exhaust(arm, body)
 
-        if do_extend_safe:
-            # Add a number of new customization shape keys.
-            add_extras.add_shape_keys(arm, body, do_extend_full)
+        # If there's no cf_J_FaceUp_tz, it's a custom head and most of this would not work anyway
+        if 'cf_J_FaceUp_tz' in body.vertex_groups:
+            if do_extend_safe:
+                # Add a number of new customization shape keys.
+                add_extras.add_shape_keys(arm, body, do_extend_full)
 
-            # Reversible mods.
-            # This splits a number of VGs and adds a number of bones, but in such a manner that, with new bones in null pose,
-            # the result should be virtually identical to unmodified mesh
-            # (slight changes are expected, because new bones are slightly offset from their parents for posing convenience,
-            # but they should be minimal).
-            add_extras.add_skull_soft_neutral(arm, body)
-            add_extras.add_spine_rear_soft(arm, body)
+                # Reversible mods.
+                # This splits a number of VGs and adds a number of bones, but in such a manner that, with new bones in null pose,
+                # the result should be virtually identical to unmodified mesh
+                # (slight changes are expected, because new bones are slightly offset from their parents for posing convenience,
+                # but they should be minimal).
+                add_extras.add_skull_soft_neutral(arm, body)
+                add_extras.add_spine_rear_soft(arm, body)
 
-            # This is irreversible but harmless (fixing upper/lower lip identifications.)
-            add_extras.repaint_mouth_minimal(arm, body)
+                # This is irreversible but harmless (fixing upper/lower lip identifications.)
+                add_extras.repaint_mouth_minimal(arm, body)
 
-        # Irreversible mods (unique or fundamentally changed VGs)
-        if do_extend_full:
-            # Repaint nose bridge to forehead transition
-            add_extras.repaint_nose_bridge(arm, body)
-            # Repaint upper neck to lower skull transition
-            add_extras.repaint_upper_neck(arm, body)
-            # Eliminate cf_J_FaceLow_s, reassigning all its weights to other VGs
-            # Add two new bones to control nose-cheek and nasolabial fold areas
-            add_extras.repaint_face(arm, body)
-            # Add bones and VGs for nostrils and nasal septum
-            add_extras.add_nostrils(arm, body)
+            # Irreversible mods (unique or fundamentally changed VGs)
+            if do_extend_full and 'cf_J_FaceUp_tz' in body.vertex_groups:
+                # Repaint nose bridge to forehead transition
+                add_extras.repaint_nose_bridge(arm, body)
+                # Repaint upper neck to lower skull transition
+                add_extras.repaint_upper_neck(arm, body)
+                # Eliminate cf_J_FaceLow_s, reassigning all its weights to other VGs
+                # Add two new bones to control nose-cheek and nasolabial fold areas
+                add_extras.repaint_face(arm, body)
+                # Add bones and VGs for nostrils and nasal septum
+                add_extras.add_nostrils(arm, body)
 
-        # Scalp VG (for curves hair attachment)
-        add_extras.paint_scalp(arm, body)
+            # Scalp VG (for curves hair attachment)
+            add_extras.paint_scalp(arm, body)
 
         t2=time.time()
         print("Tweaks done in %.3f s" % (t2-t1))

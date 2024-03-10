@@ -1,38 +1,52 @@
-2024/02/07 UPDATE
+This is a Blender add-on that allows you to import HS2/AI characters and to manipulate them.
 
-The project is in process of being updated for Blender 4.0. When conversion is completed, it will function as a Blender add-on. Stay tuned for further updates.
+*** FEATURES
 
----
+* The exact rig used by the game, with armature vertex weights, bone constraints, and shape keys / blend shapes. 
+* Limited IK support.
+* Hair, clothes, and accessories (though as far as how accurate they will be, YMMV.) 
+* A number of optional extensions to fine-tune character shapes in ways not natively available in-game (e.g. nostril shapes and temple depressions.)
+* A "preset database" for easy manipulation of previously imported characters.
 
-This is a set of scripts and templates for exporting HS2/AI characters into Blender.
+*** STEP BY STEP INSTRUCTIONS
 
-These scripts give you the exact rig used by the game, with realistic range of motion in knees and hips that is very hard to achieve with metarig. You get full armature + vertex weights + bone constraints + even shape keys (aka blend shapes) out of the box. In addition, you get hair, clothes, and accessories (though as far as how accurate they will be, YMMV.)
+** INSTALLATION 
 
-The downside is that you get a fully custom rig. No pretty metarig controls until someone (read: me) implements it. Also, there's no IK support yet.
+Blender 4 is required (4.0.2 is known to work).
 
-STEP BY STEP INSTRUCTIONS
+Download the project as a ZIP. In Blender, go to Edit -> Preferences -> Add-ons -> Install ..., select the downloaded package, install and enable it. You will see a 'HS2Rig' tab on the right side of the 3D viewport window.
+
+** CHARACTER EXPORT/IMPORT
 
 Install Grey's MeshExporter. (It comes as 'optional' with HS2 BetterRepack.)
 
-Launch Studio Neo. Load the character. Hit F1, find Runtime Unity Editor, bind a key to open it.
+Launch Studio Neo. Load the character. Put it in T-pose. If it is a female, remove high-heel shoes (they are known to interfere with export).
 
-Use MeshExporter to export everything. Do ask for converted bump maps. Don't ask to pack png's into the fbx. 
+Hit F1, find Runtime Unity Editor, bind a key to open it.
 
-Put the character in T-pose. Hit the key for Runtime Unity Editor. In the "Scene Unity Editor", find the node called "Common Space", select it and hit 'dump'. Save it in the same folder where MeshExporter put the fbx (it is typically called something like "<HS2 root dir>\Export\20221213104852_Kazumi"), make sure to give it the '.txt' extension.
+Use MeshExporter to export everything. Do ask for converted bump maps. Don't ask to pack png's into the fbx.
 
-Open prefab_materials_meshexporter.blend in Blender. You will see a new panel called "HS2 rig" on the right side of the 3D viewer. Put the export folder in "Char directory". Hit "import model".
+Hit the key for Runtime Unity Editor. In the "Scene Unity Editor", find the node called "Common Space", select it and hit 'dump'. Save it in the same folder where MeshExporter put the fbx (it is typically called something like "<HS2 root dir>\Export\20221213104852_Kazumi"), make sure to give it the '.txt' extension.
+
+Return to Blender. Click on "Import new dump" in the HS2Rig tab and select the folder containing the dump. 
 
 Wait for it to complete (it may take a while.)
 
-If the process is successful, several new controls will appear, including hair color and eye color settings and a few posing crontrols. 
+If the process is successful, several new controls will appear, including hair color and eye color settings and a few posing controls.
 
-Switch to object mode, go through the materials and adjust the settings as needed. You may want to touch up gloss and bump levels on both body and head (they will be sewed into a single mesh, look for two different materials associated to the mesh), and fix any incorrectly/poorly textured clothes.
+The character can then be customized / fine-tuned in a number of ways:
 
-TROUBLESHOOTING:
+* Moving and resizing "soft" bones (see "Bone Collections" in the armature properties). E.g., forearms could be made thicker or thinner by enabling the "Arm - soft" bone collection and changing the scale on cf_J_ArmLow01_s_L. (Only the left arm needs to be manipulated, because the corresponding bone in the right arm has a copy constraint.) 
+* Changing material properties, e.g. head and torso bump scale, eyebrow location/rotation, fingernail color. 
+* A couple of editable settings controlling the skin can be found in the "Custom Properties" section of the armature.
+
+You will also see an "Add as a new preset" button, which will save the information about the imported character, including the path, hair/eye colors, shape customizations, and some material customizations, into a permanent config file (in Windows, this config will be in C:\Users\<user name>\AppData\Roaming\Blender Foundation\Blender\<version>\scripts\addons\hs2_blender_export-main\assets\hs2blender.json.) This character could then be reloaded by selecting it in the "presets" drop box and clicking "Load preset character".
+
+** TROUBLESHOOTING
 
 * Script does not seem to do anything, or it produces an untextured / incompletely textured object:
 
-Double check that the "Char directory" is correct and it contains everything it should. If a major failure occurs, the script will report the error in the "HS2 rig" panel.
+Double check that the dump directory contains everything it should (there should be a .fbx, a text file, and a subdirectory called "Textures".) If a major failure occurs, the script will report the error in the "HS2 rig" panel.
 
 * Script appears to hang Blender if 'Refactor armature' is checked:
 
@@ -56,7 +70,7 @@ May be have a few different causes. One possibility is that the Unity dump is wr
 
 * Script imports a male character without reporting errors, but his skin is completely messed up:
 
-To import male characters, you must turn off their genitals. If you don't, due to a bug in MeshExporter, the genitals texture will overwrite the main body texture.
+To import male characters, you may need to turn off their genitals. If you don't, the genitals texture may overwrite the main body texture. (Even if this problem does not occur, the importer currently does not texture them correctly. It may be safer to export the character without genitals; the importer can attach a standard version.)
 
 * The character has bright green eyes with green pupils:
 
@@ -78,11 +92,11 @@ This is probably a bug in Studio Neo (you may notice that the character has low-
 
 Edit the material for the item you want to fix and set 'Clothes damage' to 0 or -0.1.
 
-NOTES:
+** NOTES
 
-To pose the character, go to "pose mode" on the armature, select layers (primary FK bones are in the top row: left leg is layer 0, right leg is layer 1, etc), then select bones and rotate them with the mouse (click 'r' to go into rotation mode) or directly from the item transform window (top right corner of the 3D view panel).
+To pose the character, go to "pose mode" on the armature, select layers, then select bones and rotate them with the mouse (click 'r' to go into rotation mode) or directly from the item transform window (top right corner of the 3D view panel).
 
-A few facial features can be controlled this way too. The script will try to tweak weight paints around the lips to make it possible to open the mouth by rotating 'cf_J_Chin_rs' (this can't be done with stock mesh.) The preferred way to control the face is to use shape keys. "Body", "object mode", "object data properties" (green triangle in the properties panel), "shape keys" window. E.g., to open the character's mouth, set k09_open1 to 1.0. Most names are in Japanese, auto-translating them is on the todo list. "Warai" - laughing, "Kanasimi" - sad, "ikari" - angry, "fukure" - bulge(?), "damage"  - hurt, "fera" - blow, "sitadasi" - sticking the tongue out, "ahe" - cough(?), "tehepero" - sticking the tongue out at an angle. You also get 'k18_a', 'k19_i', etc, that you can use to simulate speech.
+The preferred way to control the face is to use shape keys. "Body", "object mode", "object data properties" (green triangle in the properties panel), "shape keys" window. E.g., to open the character's mouth, set k09_open1 to 1.0. Most names are in Japanese. "Warai" - laughing, "Kanasimi" - sad, "ikari" - angry, "fukure" - bulge(?), "damage"  - hurt, "fera" - blow, "sitadasi" - sticking the tongue out, "ahe" - cough(?), "tehepero" - sticking the tongue out at an angle. You also get 'k18_a', 'k19_i', etc, that you can use to simulate speech.
 
 For more complex facial emotions, you need to use multiple shape keys. E.g., for a proper "hurt", you need e05_damage (eyes), g07_damage (eyebrows), and k06_damage (mouth).
 
@@ -90,21 +104,12 @@ The script autogenerates a somewhat more realistic 'better_smile' shape key, giv
 
 Gaze direction is set with cf_J_look_L, cf_J_look_R.
 
-Handling multiple characters will be more convenient with a config file. Just create a text file along these lines
-```
-C:\temp\waifus\Export\
-Emily 20211006234404_Emily 0.424 0.562 0.633 0.313 0.198 0.120
-Angel 20211015005854_angel 0.330 0.330 0.330 0.733 0.838 0.512
-Takeda 20211015164736_Takeda_Miu 0.000 0.600 0.000 0.150 0.100 0.050
-```
-This assumes that you have, e.g., in C:\temp\waifus\Export\20211006234404_Emily, a .fbx (from MeshExporter), a .txt (Unity dump), and a Textures\ subfolder with textures. The 6 numbers are the eye color and the hair color (in this case, 0.424 0.562 0.633 means light blue eyes and 0.313 0.198 0.120 is straw colored hair.) 
-
-KNOWN ISSUES:
+** KNOWN ISSUES
 
 * Produced characters have no pubic hair; males have no facial hair.
-* Bone constraints have not been fully set up yet.
-* It will have a shot at automatic texturing of clothing and hair, but the result is going to be very crude.
-* It does not import and texture all accessories; some accessories end up unpainted and unpositioned.
+* If the character has a custom head (many female characters do), the outcome is highly uncertain, but total success is unlikely (at best, new facial control bones and shape keys will be either unavailable or hopelessly broken).
+* It will have a shot at automatic texturing of clothing and hair, but the result is going to be very crude. Clothing materials often have internal parameters (e.g. colors and texture scales) which are simply not accessible to the importer. You will probably need to inspect clothing items in Material Editor to determine how they should be textured.
+* It does not import and texture all accessories; some accessories end up unpainted and unpositioned or incorrectly positioned.
 * Possibly many other bugs I haven't discovered yet.
 
 

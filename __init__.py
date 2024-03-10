@@ -476,7 +476,7 @@ def standard_pose_select(self, value):
    set_fixed_pose(bpy.context, value)
 
 injector_options=[
-("Auto","Auto","Use gender"),
+("Auto","Auto","Autodetect"),
 ("Yes","Yes","Attach"),
 ("No","No","Do not attach")
 ]

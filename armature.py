@@ -117,6 +117,22 @@ bone_classes={
 'cf_J_Toes_Ring1_': 'sssfsss',
 'cf_J_Toes_Pinky1_': 'sssfsss',
 
+'cf_J_Toes_Big01_': 'sssfsss',
+'cf_J_Toes_Long01_': 'sssfsss',
+'cf_J_Toes_Middle01_': 'sssfsss',
+'cf_J_Toes_Ring01_': 'sssfsss',
+'cf_J_Toes_Little01_': 'sssfsss',
+'cf_J_Toes_Big02_': 'sssfsss',
+'cf_J_Toes_Long02_': 'sssfsss',
+'cf_J_Toes_Middle02_': 'sssfsss',
+'cf_J_Toes_Ring02_': 'sssfsss',
+'cf_J_Toes_Little02_': 'sssfsss',
+'cf_J_Toes_Big_Nail_': 'sssfsss',
+'cf_J_Toes_Long_Nail_': 'sssfsss',
+'cf_J_Toes_Middle_Nail_': 'sssfsss',
+'cf_J_Toes_Ring_Nail_': 'sssfsss',
+'cf_J_Toes_Little_Nail_': 'sssfsss',
+
 'cf_J_LegUpDam_': 'c',
 'cf_J_LegKnee_back_': 'c',  # r - dynamic constraint
 'cf_J_LegKnee_dam_': 'c',
@@ -177,6 +193,12 @@ bone_classes={
 'cf_J_Hand_Thumb01_': 'f',
 'cf_J_Hand_Thumb02_': 'f',
 'cf_J_Hand_Thumb03_': 'f',
+
+'cf_J_Hand_Index_Nail_': 'f',
+'cf_J_Hand_Little_Nail_': 'f',
+'cf_J_Hand_Middle_Nail_': 'f',
+'cf_J_Hand_Ring_Nail_': 'f',
+'cf_J_Hand_Thumb_Nail_': 'f',
 
 'cf_J_Hips': 'xxxfxxx',
 'cf_J_Kosi01': 'xxxfsxs',  # Optional scale x,z "Pelvis and legs scale X, Z"
@@ -1113,12 +1135,6 @@ def reshape_armature(path, arm, body, fallback, dumpfilename):
     boy = body['Boy']>0.0
     bpy.ops.object.mode_set(mode='OBJECT')
     bpy.ops.object.mode_set(mode='EDIT')
-    
-    # custom head mesh
-    if fallback or (not 'cf_J_CheekLow_L' in arm.data.edit_bones):
-        print("Custom head mesh suspected, taking the fallback route");
-        reshape_armature_fallback(arm, body, dumpfilename)
-        return False
 
     with bpy.data.libraries.load(os.path.dirname(__file__)+"/assets/prefab_materials_meshexporter.blend") as (data_from, data_to):
         data_to.texts = data_from.texts
@@ -1130,6 +1146,24 @@ def reshape_armature(path, arm, body, fallback, dumpfilename):
         m[1][3]+=15.935
         m[2][3]+=-0.23
         default_rig[x]=m
+
+    for b in arm.data.edit_bones:
+        # corrupted armature in the dump?
+        if (b.tail-b.head).length<1e-6 or not math.isfinite(b.tail[0]):
+            print("Damaged bone:", b.name, "; trying to recover...")
+            print(b.matrix)
+            print(arm.pose.bones[b.name].matrix_basis)
+            b.tail = b.head+Vector([0,0.1,0])
+            if b.name in default_rig:
+                b.matrix = default_rig[b.name]
+            arm.pose.bones[b.name].matrix_basis=Matrix([[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]])
+    
+    # custom head mesh
+    if fallback or (not 'cf_J_CheekLow_L' in arm.data.edit_bones):
+        print("Custom head mesh suspected, taking the fallback route");
+        reshape_armature_fallback(arm, body, dumpfilename)
+        return False
+
         
     for x in arm.data.edit_bones:
         if not x.name in default_rig:
@@ -1207,7 +1241,7 @@ def reshape_armature(path, arm, body, fallback, dumpfilename):
             data_to.meshes = data_from.meshes
         for b in body_parts:
             b2 = bpy.data.objects[b["ref"]]
-            x, y = solve_for_deform(b, b2, map=map)
+            x, y, _, _ = solve_for_deform(b, b2, map=map)
             npass += x
             fail_vert += y
             print(" => ", npass, fail_vert)
