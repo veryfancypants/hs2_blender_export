@@ -151,9 +151,9 @@ def set_attr(name, x):
             h.pose.bones['cf_J_Ana'].scale = Vector([1,1,1])
             h.pose.bones['cf_J_ExhaustValve'].scale=Vector([1,1,1])
         else:
-            h.pose.bones['cf_J_Ana'].scale = Vector([max(x/1.5,1),1,max(x/3,1)])
+            h.pose.bones['cf_J_Ana'].scale = Vector([max(x/2,1),1,max(x/3,1)])
             h.pose.bones['cf_J_ExhaustClench'].scale=Vector([max(x/3,1),1,max(x/3,1)])
-            h.pose.bones['cf_J_ExhaustValve'].scale=Vector([max(x/3,1),1,max(x/3,1)])
+            h.pose.bones['cf_J_ExhaustValve'].scale=Vector([max(x/5,1),1,max(x/5,1)])
         h.pose.bones['cf_J_ExhaustClench'].location=Vector([0.008*(max(x/3,1)-1), 0, 0])
         h.pose.bones['cf_J_ExhaustValve'].location=Vector([0.008*(max(x/3,1)-1), 0, 0])
 

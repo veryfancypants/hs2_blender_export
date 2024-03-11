@@ -324,7 +324,10 @@ def load_textures(arm, body, hair_color, eye_color, suffix):
     set_tex(eyebase_L, 'Image Texture', 'eye', 'MainTex', csp='Non-Color')    
     set_tex(eyebase_L, 'Image Texture.001', 'eye', 'Texture2', csp='Non-Color')    
     set_tex(eyebase_L, 'Image Texture.002', 'eye', 'Texture3', csp='Non-Color')    
-    set_tex(eyebase_L, 'Image Texture.003', 'eye', 'Texture4', csp='Non-Color')    
+    tex = set_tex(eyebase_L, 'Image Texture.003', 'eye', 'Texture4', csp='Non-Color')    
+    tex4px0 = [tex.pixels[0], tex.pixels[1], tex.pixels[2]]
+    if tex4px0[0]<0.01 and tex4px0[1]>0.99 and tex4px0[2]<0.01:
+        disconnect_link(eye_mat, 'Image Texture.003')
     #if eye_color!=None:
     eye_mat.node_tree.nodes['RGB'].outputs[0].default_value = eye_color
     body["eye_mat"]=eye_mat
@@ -1026,8 +1029,8 @@ def import_body(input, refactor,
         body.data.update()
 
         tooth = bpy.data.objects[body["o_tooth"]]
-        if replace_teeth:
-            tooth.data=bpy.data.meshes["Prefab Tooth v2"]
+        if refactor and replace_teeth:
+            tooth.data=bpy.data.meshes["Prefab Tooth v2"].copy()
             tooth.data.shape_keys.key_blocks["20"].value=0.
             tooth.data.shape_keys.key_blocks["Smaller"].value=0.
             tooth.location=Vector([0, 15.95, -0.08])

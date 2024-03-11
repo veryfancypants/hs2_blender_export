@@ -630,15 +630,16 @@ def set_fixed_pose(context, pose):
     v+=finger_curl(0.0 if (pose=='T' or pose=='Pray') else context.scene.hs2rig_data.finger_curl_scale)
     #print(v)
     # todo: clear all bones
-    deformed_rig = arm["deformed_rig"]
-    for x in arm.pose.bones:
-        if x.name in ['balls','stick_01','stick_02','stick_03','stick_04','tip_base','fskin_bottom','fskin_top','fskin_left','fskin_right','sheath']:
-            continue
-        if x.name in deformed_rig and armature.bone_class(x.name, 'rotation')=='f':
-            default_rig = Matrix(deformed_rig[x.name]).decompose()
-            current_rig = x.matrix_basis.decompose()
-            current_rig = (current_rig[0], default_rig[1], current_rig[2])
-            x.matrix_basis = recompose(current_rig) #deformed_rig[x.name]
+    if "deformed_rig" in arm:
+        deformed_rig = arm["deformed_rig"]
+        for x in arm.pose.bones:
+            if x.name in ['balls','stick_01','stick_02','stick_03','stick_04','tip_base','fskin_bottom','fskin_top','fskin_left','fskin_right','sheath']:
+                continue
+            if x.name in deformed_rig and armature.bone_class(x.name, 'rotation')=='f':
+                default_rig = Matrix(deformed_rig[x.name]).decompose()
+                current_rig = x.matrix_basis.decompose()
+                current_rig = (current_rig[0], default_rig[1], current_rig[2])
+                x.matrix_basis = recompose(current_rig) #deformed_rig[x.name]
     for x in v:
         #arm.pose.bones[x[0]].rotation_mode=rot_mode
         arm.pose.bones[x[0]].rotation_euler=Euler((x[1]*math.pi/180., x[2]*math.pi/180., x[3]*math.pi/180.), rot_mode)
@@ -778,7 +779,6 @@ class hs2rig_OT_load_preset_character(Operator):
         hair_color = preset.hair_color
         uuid = preset["uuid"]
         name = preset.name
-
         arm=importer.import_body(preset.get_path(),
             refactor=context.scene.hs2rig_data.refactor,
             do_extend_safe=context.scene.hs2rig_data.extend_safe,

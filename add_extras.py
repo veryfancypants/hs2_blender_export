@@ -39,7 +39,8 @@ def make_child_bone(arm, parent, name, offset, collection, rotation_mode='XYZ', 
         arm["deformed_uncustomized_rig"][name]=arm.pose.bones[name].matrix_basis.copy()
     except:
         pass
-    arm["deformed_rig"][name]=arm.pose.bones[name].matrix_basis.copy()
+    if "deformed_rig" in arm:
+        arm["deformed_rig"][name]=arm.pose.bones[name].matrix_basis.copy()
     if copy!='':
         assert name[-1]=='R'
     if 'l' in copy:
@@ -63,8 +64,6 @@ def get_weight(body, vertex, group):
 def set_weight(body, vertex, group, weight):
     if isinstance(group, str):
         group = body.vertex_groups[group].index
-    if vertex==843:
-        print("set_weight", vertex, body.vertex_groups[group].name, weight)
     for g in body.data.vertices[vertex].groups:
         if g.group==group:
             g.weight=weight
@@ -313,12 +312,10 @@ def eye_shape(arm, body, bm, on=True):
 
     def formula(vert, co, norm, uv, **kwargs):#for x in set(list(v)):
         x=vert
-        #co = body.data.vertices[x].co.copy()
         sign = -1 if co[0]>0 else 1
 
         if co[0]>0:
-            co=Vector((co[0]*-1., co[1], 0.))
-        #en = [None, 1e10, None]
+            co=Vector((co[0]*-1., co[1], co[2]))
         y = min(eyeball, key=lambda z: (co-body.data.vertices[z].co).length)
         r = co-body.data.vertices[y].co
         n = body.data.vertices[y].normal
@@ -337,11 +334,7 @@ def eye_shape(arm, body, bm, on=True):
             w02 = get_weight(body, x, 'cf_J_Eye02_s_L')+get_weight(body, x, 'cf_J_Eye02_s_R')
             w04 = get_weight(body, x, 'cf_J_Eye04_s_L')+get_weight(body, x, 'cf_J_Eye04_s_R')
             if w02<0.05 and w01+w04>0.800:
-                #if x==12813:
-                #    print("Correction", interpolate(0, -1, 0.800, 1.000, w01+w04), interpolate(1, 0, 0.2, 0.4, w04/(w01+w04)) )
                 effect += effect*interpolate(0, -1, 0.800, 1.000, w01+w04) * bump(w04/(w01+w04), 0, 0.2, 0.4) * (2 if dot<0 else 1)
-            #if vert==9742:
-            #    print(vert, r.length, n, dot)
 
         if uv[0]>0.500:
             uv=(1-uv[0],uv[1])
@@ -349,8 +342,6 @@ def eye_shape(arm, body, bm, on=True):
             lower_lid_fold = curve_interp(lower_lid_low_curve, uv[0])
             w_x = bump(uv[0], 0.383, 0.408, 0.441, shape='cos')
             w_y = max(0, 1.-abs(uv[1]-lower_lid_fold)/(0.518-lower_lid_fold))
-            #if vert==9742:
-            #    print(vert, w_x, w_y)
             effect[2] += -0.01*w_x*w_y
 
         return effect
@@ -766,12 +757,19 @@ def jaw_soften(arm, body, bm, on=True):
     #    body.vertex_groups.new(name='Jaw edge')
     #idx = body.vertex_groups['Jaw edge'].index
     #exclude_vg = vgroup(body, ['cf_J_FaceRoot_s'])
-    curve=[
+    curve_m=[
     (0.223, 0.244),
     (0.326, 0.213),
     (0.418, 0.218),
     (0.500, 0.224)
     ]
+    curve_f=[
+    (0.223, 0.282),
+    (0.326, 0.258),
+    (0.418, 0.230),
+    (0.500, 0.230)
+    ]
+    curve = curve_m if body["Boy"]>0 else curve_f
     def formula(uv, vert, norm, co, **kwargs):
         #if vert in exclude_vg:
         #    return Vector([0,0,0])
@@ -781,8 +779,6 @@ def jaw_soften(arm, body, bm, on=True):
         if uv[0]>0.5:
             uv=(1-uv[0],uv[1])
         effect = bump(pos, -2*width, 0, width, shape='cos') * (1. + bump(uv[0], 0.43, 0.46, 0.49, shape='cos'))
-        if vert==6872:
-            print(vert, uv, pos, bump(pos, -2*width, 0, width, shape='cos'), (1. + bump(uv[0], 0.43, 0.46, 0.49, shape='cos')) )
 
         return norm * -0.01 * effect
 
@@ -896,6 +892,7 @@ def repaint_mouth_cavity(x):
             x.vertex_groups['cf_J_Chin_rs'].add([y], chw, 'ADD')
 
 def add_skull_soft_neutral(arm, body):
+    print("add_skull_soft_neutral")
     split_vgroup(body, "cf_J_ChinFront_s", 'cf_J_Chin_rs', lambda co, **kwargs: sigmoid(co[2], 0.40, 0.15))
     split_vgroup(body, "cf_J_FaceUpFront_ty", 'cf_J_FaceUp_ty', lambda co, **kwargs: max(0,min(0.5,(co[2]+0.25)*2.)))
     split_vgroup(body, 'cf_J_FaceRoot_r_s', "cf_J_FaceRoot_s", lambda co, **kwargs: 1.-max(0,min(1,(co[2]+0.25)*2.)))
@@ -946,6 +943,23 @@ def add_skull_soft_neutral(arm, body):
 
     body.vertex_groups['cf_J_FaceLow_s'].name = 'cf_J_FaceLow_s_s'
     body.vertex_groups['cf_J_Nose_t'].name = 'cf_J_Nose_t_s'
+
+    
+    # Touch up weights of CheekLow at the cheek / chin boundary
+    lay = bm.loops.layers.uv['uv1']
+    v_l=vgroup(body, ['cf_J_CheekLow_L','cf_J_CheekLow_R'])
+    for x in v_l:
+        uv = bm.verts[x].link_loops[0][lay].uv
+        if uv[0]>0.500:
+            g='cf_J_CheekLow_L'
+        else:
+            g='cf_J_CheekLow_R'
+            uv=(1.-uv[0], uv[1])
+        t = uv[0]-0.581+(uv[1]-0.292)*1.2
+        if t<0.002:
+            old_weight = get_weight(body, x, g)
+            new_weight = max(0., 0.095+t*3)
+            set_weight(body, x, g, min(old_weight, new_weight))
 
     bm.free()
 

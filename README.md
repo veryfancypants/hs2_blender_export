@@ -20,7 +20,7 @@ Download the project as a ZIP. In Blender, go to Edit -> Preferences -> Add-ons 
 
 Install Grey's MeshExporter. (It comes as 'optional' with HS2 BetterRepack.)
 
-Launch Studio Neo. Load the character. Put it in T-pose. If it is a female, remove high-heel shoes (they are known to interfere with export).
+Launch Studio Neo. Load the character. Put it in T-pose. If it is a female, remove high-heel shoes (they are known to interfere with export). Turn off blinking (Anim -> Kinematics -> Face).
 
 Hit F1, find Runtime Unity Editor, bind a key to open it.
 
@@ -40,7 +40,7 @@ The character can then be customized / fine-tuned in a number of ways:
 * Changing material properties, e.g. head and torso bump scale, eyebrow location/rotation, fingernail color. 
 * A couple of editable settings controlling the skin can be found in the "Custom Properties" section of the armature.
 
-You will also see an "Add as a new preset" button, which will save the information about the imported character, including the path, hair/eye colors, shape customizations, and some material customizations, into a permanent config file (in Windows, this config will be in C:\Users\<user name>\AppData\Roaming\Blender Foundation\Blender\<version>\scripts\addons\hs2_blender_export-main\assets\hs2blender.json.) This character could then be reloaded by selecting it in the "presets" drop box and clicking "Load preset character".
+You will also see an "Add as a new preset" button, which will save the information about the imported character, including the path, hair/eye colors, shape customizations, and some material customizations, into a permanent config file. This character could then be reloaded by selecting it in the "presets" drop box and clicking "Load preset character".
 
 ** TROUBLESHOOTING
 
@@ -86,7 +86,7 @@ Either something went wrong with bump mapping (as above, set levels to 0 on the 
 
 * The character has the "default" low-quality teeth mesh, even though it has good teeth in the game:
 
-This is probably a bug in Studio Neo (you may notice that the character has low-quality teeth there too.) Use MeshExporter to dump the character directly out of the game (you won't be able to do the whole process, since you can't put the character in T-pose, but you can at least get the fbx). Manually insert the correct teeth into the scene and parent them to the armature.
+This is probably a bug in Studio Neo (you may notice that the character has low-quality teeth there too.) Use MeshExporter to dump the character directly out of the game (you won't be able to do the whole process, since you can't put the character in T-pose, but you can at least get the fbx). 
 
 * The character has torn clothing:
 
@@ -100,9 +100,9 @@ The preferred way to control the face is to use shape keys. "Body", "object mode
 
 For more complex facial emotions, you need to use multiple shape keys. E.g., for a proper "hurt", you need e05_damage (eyes), g07_damage (eyebrows), and k06_damage (mouth).
 
-The script autogenerates a somewhat more realistic 'better_smile' shape key, give it a try.
-
 Gaze direction is set with cf_J_look_L, cf_J_look_R.
+
+The importer assumes that it has write access to its own source (<ref>REFERENCE.md#Operations</ref>). 
 
 ** KNOWN ISSUES
 

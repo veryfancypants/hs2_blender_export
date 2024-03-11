@@ -8,8 +8,8 @@ import hashlib
 from mathutils import Matrix, Vector, Euler, Quaternion
 import struct
 import numpy
-from .solve_for_deform import try_load_solution_cache, solve_for_deform, save_solution_cache
-from . import add_extras, importer
+#from .solve_for_deform import try_load_solution_cache, solve_for_deform, save_solution_cache
+from . import add_extras, importer, solve_for_deform
 
 def recompose(v):
         T = Matrix.Translation(v[0])
@@ -1131,6 +1131,8 @@ def load_unity_dump(dump):
                     local_pos[name] = bone_pos[name]
     return bone_pos, local_pos, hash
 
+solver_flags = 0
+
 def reshape_armature(path, arm, body, fallback, dumpfilename): 
     boy = body['Boy']>0.0
     bpy.ops.object.mode_set(mode='OBJECT')
@@ -1160,7 +1162,8 @@ def reshape_armature(path, arm, body, fallback, dumpfilename):
     
     # custom head mesh
     if fallback or (not 'cf_J_CheekLow_L' in arm.data.edit_bones):
-        print("Custom head mesh suspected, taking the fallback route");
+        if not fallback:
+            print("Custom head mesh suspected, taking the fallback route");
         reshape_armature_fallback(arm, body, dumpfilename)
         return False
 
@@ -1230,25 +1233,17 @@ def reshape_armature(path, arm, body, fallback, dumpfilename):
     arm["deformed_rig"]=deformed_rig
 
     bpy.ops.object.mode_set(mode='OBJECT')  
-    npass=0
-    fail_vert=0
+    # Solve for undeformed mesh shape
     t1 = time.time()
-    loaded, map = try_load_solution_cache(path, body_parts, md5sum)
-    if not loaded:
-        # Solve for undeformed mesh shape
-        #t1 = time.time()
-        with bpy.data.libraries.load(os.path.dirname(__file__)+"/assets/prefab_materials_meshexporter.blend") as (data_from, data_to):
-            data_to.meshes = data_from.meshes
-        for b in body_parts:
-            b2 = bpy.data.objects[b["ref"]]
-            x, y, _, _ = solve_for_deform(b, b2, map=map)
-            npass += x
-            fail_vert += y
-            print(" => ", npass, fail_vert)
-        #t2 = time.time()
-        print("Done in ", npass, " passes, ", fail_vert, "failed vertices")
-        #print("Lead time", lead_time, "Total time", total_time)
-        save_solution_cache(path, body_parts, md5sum)
+    with bpy.data.libraries.load(os.path.dirname(__file__)+"/assets/prefab_materials_meshexporter.blend") as (data_from, data_to):
+        data_to.meshes = data_from.meshes
+    bpy.ops.object.mode_set(mode='OBJECT')
+    for b in body_parts:
+        bpy.context.view_layer.objects.active = b
+        b.data.update()
+        b2 = bpy.data.objects[b["ref"]]
+        solve_for_deform.solve_for_deform(arm, b, b2)
+
     t2 = time.time()
     print("Rest position calculated in %.3f s" % (t2-t1)) 
     bpy.ops.object.select_all(action='DESELECT')
@@ -1259,9 +1254,6 @@ def reshape_armature(path, arm, body, fallback, dumpfilename):
     return True
 
 def reshape_armature_fallback(arm, body, dumpfilename): 
-    #arm = bpy.data.objects['Armature']
-    #arm = bpy.context.view_layer.objects.active
-    #body = bpy.data.objects['body']
     arm["default_rig"]=None
     
     bone_pos, _, _ = load_unity_dump(dumpfilename)
@@ -1482,13 +1474,14 @@ def dump_pose(a, of, x='cf_J_Root', flags=3):
 
 
 def set_fk_pose(arm, v):
-    deformed_rig = arm["deformed_rig"]
-    for x in arm.pose.bones:
-        if x.name in deformed_rig and bone_class(x.name, 'rotation')=='f':
-            default_rig = Matrix(deformed_rig[x.name]).decompose()
-            current_rig = x.matrix_basis.decompose()
-            current_rig = (current_rig[0], default_rig[1], current_rig[2])
-            x.matrix_basis = recompose(current_rig) #deformed_rig[x.name]
+    if "deformed_rig" in arm:
+        deformed_rig = arm["deformed_rig"]
+        for x in arm.pose.bones:
+            if x.name in deformed_rig and bone_class(x.name, 'rotation')=='f':
+                default_rig = Matrix(deformed_rig[x.name]).decompose()
+                current_rig = x.matrix_basis.decompose()
+                current_rig = (current_rig[0], default_rig[1], current_rig[2])
+                x.matrix_basis = recompose(current_rig) #deformed_rig[x.name]
     for x in v:
         #arm.pose.bones[x[0]].rotation_mode=rot_mode
         arm.pose.bones[x[0]].rotation_euler=Euler((x[1]*math.pi/180., x[2]*math.pi/180., x[3]*math.pi/180.), rot_mode)
