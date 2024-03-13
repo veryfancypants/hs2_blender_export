@@ -28,7 +28,10 @@ Use MeshExporter to export everything. Do ask for converted bump maps. Don't ask
 
 Hit the key for Runtime Unity Editor. In the "Scene Unity Editor", find the node called "Common Space", select it and hit 'dump'. Save it in the same folder where MeshExporter put the fbx (it is typically called something like "<HS2 root dir>\Export\20221213104852_Kazumi"), make sure to give it the '.txt' extension.
 
+![studio_neo_export.jpg](https://github.com/veryfancypants/veryfancypants.github.io/blob/master/studio_neo_export.jpg?raw=true)
 Return to Blender. Click on "Import new dump" in the HS2Rig tab and select the folder containing the dump. 
+
+![Import](https://github.com/veryfancypants/veryfancypants.github.io/blob/master/blender_import_1.jpg?raw=true)
 
 Wait for it to complete (it may take a while.)
 
@@ -39,6 +42,11 @@ The character can then be customized / fine-tuned in a number of ways:
 * Moving and resizing "soft" bones (see "Bone Collections" in the armature properties). E.g., forearms could be made thicker or thinner by enabling the "Arm - soft" bone collection and changing the scale on cf_J_ArmLow01_s_L. (Only the left arm needs to be manipulated, because the corresponding bone in the right arm has a copy constraint.) 
 * Changing material properties, e.g. head and torso bump scale, head and torso skin gloss, eyebrow location/rotation, fingernail color.
 * A couple of editable settings controlling the skin can be found in the "Custom Properties" section of the armature.
+
+![Import 2](https://github.com/veryfancypants/veryfancypants.github.io/blob/master/blender_import_2.jpg?raw=true)
+
+![Skin detail ("alternate skin" on, base skin gloss 0.3, pore_depth 2.0, pore_intensity 2.0)](https://github.com/veryfancypants/veryfancypants.github.io/blob/master/blender_import_3.jpg?raw=true)
+
 
 You will also see an "Add as a new preset" button, which will save the information about the imported character, including the path, hair/eye colors, shape customizations, and some material customizations, into a permanent config file. This character could then be reloaded by selecting it in the "presets" drop box and clicking "Load preset character".
 
@@ -91,6 +99,6 @@ The importer assumes that it has write access to its own source ([link](REFERENC
 ## KNOWN ISSUES
 
 * Produced characters have no pubic hair; males have no facial hair.
-* If the character has a custom head (many female characters do), the outcome is highly uncertain, but total success is unlikely (at best, new facial control bones and shape keys will be either unavailable or hopelessly broken).
+* If the character has a custom head (many female characters do), the outcome is uncertain, but total success is unlikely (in particular, the importer will not attempt to add "new" facial control bones or shape keys if it detects a custom head.)
 * It will have a shot at automatic texturing of clothing, accessories and hair, but the result is going to be very crude. Clothing materials often have internal parameters (e.g. colors and texture scales) whose correct values are simply not known to the importer. You will probably need to inspect clothing items in Material Editor to determine how they should be textured.
 * Possibly many other bugs I haven't discovered yet.
