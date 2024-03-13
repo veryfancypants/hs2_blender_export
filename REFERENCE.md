@@ -13,9 +13,9 @@ On by default; a number of other features assume that refactoring is done, and w
 * ''Extend (full)'': add enhancements which _are_ expected to change character appearance. Create a few new facial bones that the user may need to tweak manually; create and turn on several shape keys.  Off by default.
 
 * ''Add an injector'': add a prefabricated injector to the mesh. A choice between 'On', 'Off', and 'Auto'. 'Auto' (default) enables the feature only if the character is male and does not have one already. 
-** If this feature is requested for a male character without an existing injector, the newly imported mesh will (hopefully) be attached seamlessly (the corresponding part of the original mesh will be excised and new mesh will be stitched in its place.) Otherwise, the new mesh will be joined to the original mesh and the process will stop there.
-** The prefabricated injector will be color-matched to the torso.
-** If a prefab injector is added, controls for its dimensions and readiness state will appear in the UI panel.
+  - If this feature is requested for a male character without an existing injector, the newly imported mesh will (hopefully) be attached seamlessly (the corresponding part of the original mesh will be excised and new mesh will be stitched in its place.) Otherwise, the new mesh will be joined to the original mesh and the process will stop there.
+  - The prefabricated injector will be color-matched to the torso.
+  - If a prefab injector is added, controls for its dimensions and readiness state will appear in the UI panel.
 
 * ''Add an exhaust'': add a prefabricated exhaust to the mesh. As with the injector, the importer will attempt seamless attachment; if it is successful, it will replace part of the original mesh, otherwise, it will merely join it to the existing mesh. A new 'Exhaust' control will be added to the UI panel: a slider from 0 (closed) to 10 (open to anatomically improbable levels) with the default of 1. 
 
