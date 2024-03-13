@@ -6,7 +6,7 @@ import math
 import hashlib
 from mathutils import Matrix, Vector, Euler, Quaternion
 import struct
-import numpy
+import numpy as np
 from .importer import replace_mat, set_tex, set_bump, join_meshes, disconnect_link
 import time
 import random
@@ -18,7 +18,9 @@ from .attributes import set_attr
 def clamp01(x):
     return max(0.0, min(1.0, x))
 
-def make_child_bone(arm, parent, name, offset, collection, rotation_mode='XYZ', tail_offset=None, copy=''):
+def make_child_bone(arm, parent, name, offset, collection, rotation_mode='XYZ', 
+        parent_head=True, tail_offset=None, copy='',
+        inherit_scale=True):
     if name in arm.pose.bones:
         return
     bpy.ops.object.mode_set(mode='OBJECT')
@@ -26,13 +28,18 @@ def make_child_bone(arm, parent, name, offset, collection, rotation_mode='XYZ', 
     bpy.ops.object.mode_set(mode='EDIT')
     bone = arm.data.edit_bones.new(name)
     bone.parent = arm.data.edit_bones[parent]
-    bone.head = arm.data.edit_bones[parent].head+offset
+    if parent_head:
+        bone.head = arm.data.edit_bones[parent].head+offset
+    else:
+        bone.head = offset
     if tail_offset is None:
         bone.tail = arm.data.edit_bones[parent].tail+offset
     else:
         bone.tail = bone.head+tail_offset
     arm.data.collections[collection].assign(bone)
     arm.data.collections['Everything'].assign(bone)
+    if not inherit_scale:
+        bone.inherit_scale='NONE'
     bpy.ops.object.mode_set(mode='POSE')
     arm.pose.bones[name].rotation_mode='XYZ'
     try:
@@ -81,8 +88,6 @@ def add_weight(body, vertex, group, weight):
 
     if isinstance(group, str):
         group = body.vertex_groups[group].index
-    if vertex==12306:
-        print("add_weight", vertex, body.vertex_groups[group].name, weight)
     for g in body.data.vertices[vertex].groups:
         if g.group==group:
             g.weight+=weight
@@ -159,8 +164,6 @@ def split_vgroup(body, name, vg, func, bm = None):
         uv = bm.verts[x].link_loops[0][lay].uv
         wold = [get_weight(body, x, y) for y in old_id]
         frac = func(uv=uv, vert=x, co=body.data.vertices[x].undeformed_co, norm=body.data.vertices[x].normal)
-        if x==12479:
-            print("split_vgroup", x, name, vg, wold, frac)
         for k in range(len(old_id)):
             set_weight(body, x, old_id[k], wold[k]*(1.-frac))
         set_weight(body, x, new_id, sum(wold)*frac)
@@ -277,7 +280,6 @@ def weighted_center(name):
 #
 
 def eye_shape(arm, body, bm, on=True):
-    print("eye_shape")
     bpy.ops.object.mode_set(mode='OBJECT')
     bpy.context.view_layer.objects.active = body
     #if 'Eye shape' in body.data.shape_keys.key_blocks:
@@ -309,6 +311,12 @@ def eye_shape(arm, body, bm, on=True):
     (0.383, 0.518),
     (0.441, 0.518)
     ]
+    id01l = body.vertex_groups['cf_J_Eye01_s_L'].index
+    id02l = body.vertex_groups['cf_J_Eye02_s_L'].index
+    id04l = body.vertex_groups['cf_J_Eye04_s_L'].index
+    id01r = body.vertex_groups['cf_J_Eye01_s_R'].index
+    id02r = body.vertex_groups['cf_J_Eye02_s_R'].index
+    id04r = body.vertex_groups['cf_J_Eye04_s_R'].index
 
     def formula(vert, co, norm, uv, **kwargs):#for x in set(list(v)):
         x=vert
@@ -330,9 +338,9 @@ def eye_shape(arm, body, bm, on=True):
             effect *= l*interpolate(0.15, 0, 0.005, 0.010, dot)
             effect[0] *= sign
 
-            w01 = get_weight(body, x, 'cf_J_Eye01_s_L')+get_weight(body, x, 'cf_J_Eye01_s_R')
-            w02 = get_weight(body, x, 'cf_J_Eye02_s_L')+get_weight(body, x, 'cf_J_Eye02_s_R')
-            w04 = get_weight(body, x, 'cf_J_Eye04_s_L')+get_weight(body, x, 'cf_J_Eye04_s_R')
+            w01 = get_weight(body, x, id01l)+get_weight(body, x, id01r)
+            w02 = get_weight(body, x, id02l)+get_weight(body, x, id02r)
+            w04 = get_weight(body, x, id04l)+get_weight(body, x, id04r)
             if w02<0.05 and w01+w04>0.800:
                 effect += effect*interpolate(0, -1, 0.800, 1.000, w01+w04) * bump(w04/(w01+w04), 0, 0.2, 0.4) * (2 if dot<0 else 1)
 
@@ -350,16 +358,7 @@ def eye_shape(arm, body, bm, on=True):
         'cf_J_Eye01_s_L','cf_J_Eye02_s_L','cf_J_Eye03_s_L','cf_J_Eye04_s_L'], formula, on = on, bm = bm)
     #body.data.shape_keys.key_blocks["Eye shape"].value=1. if on else 0.
 
-
-def find_nearest(mesh, v, cands):
-    a=cands[0]
-    for x in cands:
-        if (mesh.vertices[x].co-v).length<(mesh.vertices[a].co-v).length:
-            a=x
-    return a
-
 def tweak_nose(arm, body, bm, on):
-    print("tweak_nose")
     bpy.ops.object.mode_set(mode='OBJECT')
     bpy.context.view_layer.objects.active = body
     #bpy.ops.object.mode_set(mode='EDIT')
@@ -413,10 +412,11 @@ def tweak_nose(arm, body, bm, on):
             no2.normalize()
             deltas[x] = 0.02*effect*no2
 
-        if wch>0.050 and wn>0.200 and wr>0.600 and no[2]>0.3 and no[0]<-0.3:
-            deltas[x] = Vector([-0.01, 0, 0])*sigmoid(no[2], 0.6, 0.3)*sigmoid(no[0], -0.6, -0.3)
-        if wch>0.050 and wn>0.200 and wl>0.600 and no[2]>0.3 and no[0]>0.3:
-            deltas[x] = Vector([0.01, 0, 0])*sigmoid(no[2], 0.6, 0.3)*sigmoid(no[0], 0.6, 0.3)
+        if wch>0.050 and wn>0.200 and no[2]>0.3:
+            if wr>0.600 and no[0]<-0.3:
+                deltas[x] = Vector([-0.01, 0, 0])*sigmoid(no[2], 0.6, 0.3)*sigmoid(no[0], -0.6, -0.3)
+            if wl>0.600 and no[0]>0.3:
+                deltas[x] = Vector([0.01, 0, 0])*sigmoid(no[2], 0.6, 0.3)*sigmoid(no[0], 0.6, 0.3)
 
     for x in deltas:
         sk.data[x].co -= deltas[x]
@@ -689,7 +689,6 @@ def lip_arch_shapekey(arm, body, bm, on=True):
             max=2.0, on=on and not boy, bm = bm)
 
 def eyelid_crease(arm, body, bm, on=True):
-    print("eyelid_crease")
     curve_upper = [
     (0.338,0.5590),
     (0.349,0.5626),
@@ -789,6 +788,7 @@ def jaw_soften(arm, body, bm, on=True):
 
 def add_shape_keys(arm, body, on):
     t1=time.time()
+    t0=t1
     bm = bmesh.new()
     bm.from_mesh(body.data)
     bm.verts.ensure_lookup_table()
@@ -796,23 +796,48 @@ def add_shape_keys(arm, body, on):
     bm_owned = True
     # these are off by default:
     # Smile shape key
-    print(13509, body.data.vertices[13509].co, body.data.vertices[13509].undeformed_co)
     add_mouth_blendshape(body, bm)
+    t2=time.time()
+    print("Mouth: %.3f s" % (t2-t1))
+    t1=t2
     if body['Boy']>0:
         adams_apple_delete(arm, body, bm)
     # these are on by default (possibly depending on gender) unless "Extend" is off:
     tweak_nose(arm, body, bm, on=on)
+    t2=time.time()
+    print("Nose: %.3f s" % (t2-t1))
+    t1=t2
     eye_shape(arm, body, bm, on=on)
+    t2=time.time()
+    print("Eye: %.3f s" % (t2-t1))
+    t1=t2
     eyelid_crease(arm, body, bm, on=on)
+    t2=time.time()
+    print("Eyelid: %.3f s" % (t2-t1))
+    t1=t2
     upper_lip_shapekey(arm, body, bm, on=on)
+    t2=time.time()
+    print("Upper lip: %.3f s" % (t2-t1))
+    t1=t2
     lip_arch_shapekey(arm, body, bm, on=on)
+    t2=time.time()
+    print("Lip arch: %.3f s" % (t2-t1))
+    t1=t2
     temple_depress(arm, body, bm, on=on)
+    t2=time.time()
+    print("temple_depress: %.3f s" % (t2-t1))
+    t1=t2
     forehead_flatten(arm, body, bm, on=on)
+    t2=time.time()
+    print("forehead_flatten: %.3f s" % (t2-t1))
+    t1=t2
     jaw_soften(arm, body, bm, on=on)
-    print(13509, body.data.vertices[13509].co, body.data.vertices[13509].undeformed_co)
+    t2=time.time()
+    print("jaw_soften: %.3f s" % (t2-t1))
+    t1=t2
     bm.free()
     t2=time.time()
-    print("%.3f s to add shape keys" % (t2-t1))
+    print("%.3f s to add shape keys" % (t2-t0))
 #
 #
 #  MODS
@@ -936,12 +961,14 @@ def add_skull_soft_neutral(arm, body):
     make_child_bone(arm, 'cf_J_FaceRoot_s', 'cf_J_FaceRoot_r_s', Vector([0,0,-0.02]), "Head internal")
 
     make_child_bone(arm, 'cf_J_FaceLow_s', 'cf_J_FaceLow_s_s', Vector([0, 0, 0.01]), "Head internal")
+    make_child_bone(arm, 'cf_J_MouthBase_s_s', 'cf_J_MouthBase_s', Vector([0, 0, 0.01]), "Mouth")
     make_child_bone(arm, 'cf_J_Nose_t', 'cf_J_Nose_t_s', Vector([0,0,0.02]), "Nose")
 
     make_child_bone(arm, 'cf_J_CheekUp_L', 'cf_J_CheekMid_L', Vector([-0.1, 0, 0]), "Cheeks")
     make_child_bone(arm, 'cf_J_CheekUp_R', 'cf_J_CheekMid_R', Vector([0.1, 0, 0]), "Constrained - soft", copy='lrs')
 
     body.vertex_groups['cf_J_FaceLow_s'].name = 'cf_J_FaceLow_s_s'
+    body.vertex_groups['cf_J_MouthBase_s'].name = 'cf_J_MouthBase_s_s'
     body.vertex_groups['cf_J_Nose_t'].name = 'cf_J_Nose_t_s'
 
     
@@ -1102,7 +1129,6 @@ def dissolve_facelow_s(arm, body, bm):
     print("%3f s to dissolve facelow" % (t2-t1))
 
 def repaint_face(arm, body):
-    print("repaint_face")
     bpy.ops.object.mode_set(mode='OBJECT')
     bpy.context.view_layer.objects.active = arm
     id_l = body.vertex_groups['cf_J_CheekUp_L'].index
@@ -1224,8 +1250,9 @@ def test_alignment(body, mesh):
                 v.add(vc)
 
     #print("Body:", body, len(body.data.vertices))
-    print("Candidate mesh:", mesh.name, "boundary", len(v), "verts")
-    boundary=[min([Vector((body.matrix_world @ y.co)-z).length for z in v])<0.0015 for y in body.data.vertices]
+    #boundary=[min([Vector((body.matrix_world @ y.co)-z).length for z in v])<0.0015 for y in body.data.vertices]
+    boundary = [min([Vector((body.matrix_world @ y.co)-z).length for y in body.data.vertices])<0.0015 for z in v]
+    print("Candidate mesh:", mesh.name, "boundary", sum(boundary), "/", len(v), "verts")
     marked = sum(boundary)
     bmd.free()
     return float(marked)/len(v)
@@ -1250,8 +1277,9 @@ def uv_stitch(body, mesh):
     mesh.data.update()
     join_meshes([body.name, mesh.name])
     v = vgroup(body, "Stitch Boundary")
-    vm = vgroup(body, "Stitch Mesh")
-    main_mesh = [x for x in range(len(body.data.vertices)) if not x in vm]
+    vm = set(vgroup(body, "Stitch Mesh"))
+    #main_mesh = set(range(len(body.data.vertices))) ^ vm #[x for x in range(len(body.data.vertices)) if not x in vm]
+    main_mesh = set(vgroup(body, 'cf_J_Kosi02_s')) - vm
     vs = body.data.vertices
 
     bpy.ops.object.mode_set(mode='OBJECT')
@@ -1263,14 +1291,36 @@ def uv_stitch(body, mesh):
     bmd.verts.ensure_lookup_table()
     bmd.edges.ensure_lookup_table()
     lay = bmd.loops.layers.uv['uv1']
-    def uv(x):
-        return bmd.verts[x].link_loops[0][lay].uv
+    def uv(x, k):
+        return bmd.verts[x].link_loops[k % len(bmd.verts[x].link_loops)][lay].uv
 
     stitch = []
-    for x in v:
-        nearest = min([x for x in main_mesh], key=lambda y: (uv(y)-uv(x)).length)
-        stitch.append([x,nearest]) #bmd.verts[x], bmd.verts[nearest]])
+    stitch_verts=[]
+    t1 = time.time()
 
+    cos = np.zeros([len(body.data.vertices)*3], dtype=np.float32)
+    body.data.vertices.foreach_get("co", cos)
+    cos = cos.reshape([-1,3])
+    xs = cos[v].reshape([-1,1,3])
+    main_mesh_list = [z for z in main_mesh]
+    ys = cos[main_mesh_list].reshape([1,-1,3])
+    xy = xs-ys
+    xy *= xy
+    xy = np.sqrt(xy[:,:,0]+xy[:,:,1]+xy[:,:,2])
+    v_nearest = np.argmin(xy, axis=1)
+    t2 = time.time()
+    for i, x in enumerate(v):
+        nearest_xyz = main_mesh_list[v_nearest[i]]
+        if (bmd.verts[x].co-bmd.verts[nearest_xyz].co).length < 0.002:
+            nearest = nearest_xyz
+        else:
+            nearest_uv = min([z for z in main_mesh], key=lambda y: min([(uv(y,k)-uv(x,0)).length for k in range(6)]))
+            nearest = nearest_uv
+        stitch.append([x,nearest])
+        stitch_verts.append(bmd.verts[x])
+        stitch_verts.append(bmd.verts[nearest])
+    t3 = time.time()
+    print("find_nearest: %.3f + %.3f s" % (t2-t1, t3-t2))
     main_boundary = [x[1] for x in stitch]
     boundary_mask = [False]*len(vs)
     for x in main_boundary:
@@ -1290,16 +1340,23 @@ def uv_stitch(body, mesh):
             erase.append(x)
             selected+=1
 
-    if selected>=len(body.data.vertices)/4:
+    if selected>=len(main_mesh)/4:
+        print("Old exhaust inner region detect fail")
         erase=[]
+
+    #bpy.ops.object.mode_set(mode='EDIT')
+    #bpy.ops.mesh.select_all(action='DESELECT')
+    #bpy.ops.object.mode_set(mode='OBJECT')
 
     #for x in stitch:
     #    print("Joining", x)
     #    bmesh.ops.pointmerge(bmd, verts=[bmd.verts[x[0]],bmd.verts[x[1]]], merge_co=bmd.verts[x[0]].co)
+
     bmesh.ops.weld_verts(bmd,targetmap={bmd.verts[x[0]]:bmd.verts[x[1]] for x in stitch})
     bmd.verts.ensure_lookup_table()
     if len(erase)>0: 
-        erase = [bmd.verts[y] for y in erase]
+        erase = [bmd.verts[y] for y in erase if not (bmd.verts[y] in stitch_verts)]
+        #print("Erasing:", [x.index for x in erase])
         bmesh.ops.delete(bmd, geom=erase)
 
     bmd.to_mesh(body.data)
@@ -1415,9 +1472,11 @@ def attach_exhaust(arm, body):
     body.data.update()
 
     body.vertex_groups.new(name='cf_J_Perineum')
+    body.vertex_groups.new(name='cf_J_Exhaust')
+    body.vertex_groups.new(name='cf_J_ExhaustValve')
     old_id = body.vertex_groups['cf_J_Kosi02_s'].index
     #old_id_r = body.vertex_groups['cf_J_CheekUp_R'].index
-    new_id =  body.vertex_groups['cf_J_Perineum'].index
+    #new_id =  body.vertex_groups['cf_J_Perineum'].index
     v=vgroup(body, 'cf_J_Kosi02_s')
     if not 'cf_J_Ana' in body.vertex_groups:
         body.vertex_groups.new(name='cf_J_Ana')
@@ -1429,7 +1488,7 @@ def attach_exhaust(arm, body):
     s2 = body.vertex_groups['cf_J_Siri_s_R'].index
 
     undef=body.data.shape_keys.key_blocks['Basis'].data
-
+    """
     for x in v:
         if abs(undef[x].co[0])<0.25:
             f = (1. - abs(undef[x].co[0]) / 0.25) * max(0.0, min(1.0, undef[x].co[2]*2+1))
@@ -1446,7 +1505,7 @@ def attach_exhaust(arm, body):
         L = undef[x].co-Vector([0, 9.4, -0.56])
         if L.length<0.4:
             set_weight(body, x, id_ana, 0.8*sigmoid(L.length,0,0.4))
-
+    """
     mat=bpy.data.materials["Exhaust Material"].copy()
     mat.name = 'Exhaust_' + arm.name
     #replace_mat(mesh, mat)
@@ -1461,8 +1520,36 @@ def attach_exhaust(arm, body):
         m=clone_object(bpy.data.objects['Prefab exhaust pipe'])
         m.data.materials[0] = mat
         m.location = opts[1]
+        m.vertex_groups.new(name='cf_J_Exhaust')
+
+
+        v = vgroup(m, 'cf_J_Perineum')
+        for x in v:
+            # Weights in the prefab are somewhat messed up, 
+            # this is easier than properly repainting it
+            w = 0
+            for g in m.data.vertices[x].groups:
+                w += g.weight
+            if w<1:
+                add_weight(m, x, 'cf_J_ExhaustValve', 1-w)
+            elif w>1:
+                wc = get_weight(m, x, "cf_J_ExhaustClench")
+                wc -= w-1
+                if wc<0:
+                    wc=0
+                set_weight(m, x, "cf_J_ExhaustClench", wc)
+
+            # Reassign the mass of the exhaust pipe (above the valve) from Perineum to Exhaust
+            if m.data.vertices[x].co[2]<9.52:
+                continue
+            w = get_weight(m, x, 'cf_J_Perineum')
+            ws =sigmoid(m.data.vertices[x].co[2], 9.6, 9.85)
+            set_weight(m, x, 'cf_J_Perineum', w*(1-ws))
+            set_weight(m, x, 'cf_J_Exhaust', w*ws)
+
         if opts[0] is not None:
             adapter=clone_object(bpy.data.objects[opts[0]])
+            #adapter.location = Vector([0,0,0.001])
             #adapter.location = opts[1]
             adapter.data.materials[0] = mat
             name = m.name
@@ -1496,82 +1583,14 @@ def attach_exhaust(arm, body):
     else:
         mat.node_tree.nodes['Group.004'].inputs['Subsurface/MainTex mix'].default_value=0.2
 
-    
-    if False:
-        edge = vgroup(mesh, 'cf_J_ExhaustEdge')
-        kosi = vgroup(body, 'cf_J_Kosi02_s')
-        #arm.data.pose_position='REST'  
-        #bpy.context.view_layer.objects.active = mesh
-        #bpy.ops.object.mode_set(mode='EDIT')
-        matrix_world_inv = mesh.matrix_world.inverted()
-        bm = bmesh.new()
-        bm.from_mesh(mesh.data)
-        bm.verts.ensure_lookup_table()
-        undeformed_basis=body.data.shape_keys.key_blocks['Basis'].data
-        total_disp=Vector([0,0,0])
-        for x in edge:
-            #n = len(bm.verts)
-            #errors=[bm.verts[x].co - undeformed[x].co for x in range(n)]        
-            co = mesh.matrix_world @ mesh.data.vertices[x].co
-            new_pos = co
-            min_len=1e8
-            for y in kosi:
-                length = ((body.matrix_world @ undeformed_basis[y].co) - co).length
-                if length < min_len:
-                    min_len = length
-                    new_pos = body.matrix_world @ undeformed_basis[y].co
-            total_disp+=(matrix_world_inv @ new_pos)-bm.verts[x].co
-        total_disp *= 1./len(edge)
-        for x in bm.verts:
-            x.co += total_disp
-        for x in edge:
-            co = mesh.matrix_world @ bm.verts[x].co
-            new_pos = co
-            min_len=1e8
-            for y in kosi:
-                length = ((body.matrix_world @ undeformed_basis[y].co) - co).length
-                if length < min_len:
-                    min_len = length
-                    new_pos = body.matrix_world @ undeformed_basis[y].co
-            disp = new_pos - co
-            axis = Vector([0, -0.2, 0.98])
-            disp = (disp @ axis) - 0.02
-            #print(co, disp)
-            disp = axis * disp
-            co += disp
-            bm.verts[x].co = matrix_world_inv @ co
-        bm.to_mesh(mesh.data)
-
-    #center = weighted_center('cf_J_ExhaustValve')
-    center = Vector([0, 9.4, -0.5])
     bpy.context.view_layer.objects.active = arm
     arm.data.pose_position='POSE'  
     bpy.ops.object.mode_set(mode='EDIT')
-    bone = arm.data.edit_bones.new('cf_J_ExhaustValve')
-    parent=arm.data.edit_bones['cf_J_Ana']
-    bone.head = arm.data.edit_bones['cf_J_Ana'].head
-    bone.tail = (arm.data.edit_bones['cf_J_Ana'].head+arm.data.edit_bones['cf_J_Ana'].tail)/2
-    bone.parent = parent
-    arm.data.collections['Genitals'].assign(bone)
-    arm.data.collections['Everything'].assign(bone)
-    #bone.layers = parent.layers
-
-    bone = arm.data.edit_bones.new('cf_J_ExhaustClench')
-    parent=arm.data.edit_bones['cf_J_Ana']
-    bone.head = (arm.data.edit_bones['cf_J_Ana'].head+arm.data.edit_bones['cf_J_Ana'].tail)/2
-    bone.tail = arm.data.edit_bones['cf_J_Ana'].tail
-    bone.parent = parent
-    arm.data.collections['Genitals'].assign(bone)
-    arm.data.collections['Everything'].assign(bone)
-
-    bone3 = arm.data.edit_bones.new('cf_J_Perineum')
-    bone3.head = Vector([0, 9.4, -0.2])
-    bone3.tail = bone3.head+Vector([0, 0.2, 0.0])
-    bone3.parent = arm.data.edit_bones['cf_J_Kosi02_s']
-    arm.data.collections['Genitals'].assign(bone3)
-    arm.data.collections['Everything'].assign(bone3)
-
-    #bpy.context.view_layer.objects.active = arm
+    r_exh = Vector([0, 0.2, 0.05])
+    make_child_bone(arm, 'cf_J_Ana', 'cf_J_ExhaustValve', Vector([0,0,0]), 'Genitals', tail_offset=r_exh)
+    make_child_bone(arm, 'cf_J_ExhaustValve', 'cf_J_ExhaustClench', r_exh, 'Genitals', tail_offset=r_exh)
+    make_child_bone(arm, 'cf_J_Ana', 'cf_J_Exhaust', r_exh*2, 'Genitals', tail_offset=r_exh)
+    make_child_bone(arm, 'cf_J_Kosi02_s', 'cf_J_Perineum', Vector([0, 9.4, -0.2]),  'Genitals', parent_head=False, tail_offset=Vector([0, 0.2, 0.0]))
 
     bpy.ops.object.mode_set(mode='OBJECT')
     arm.data.pose_position='REST'
@@ -1579,13 +1598,11 @@ def attach_exhaust(arm, body):
     fit_mesh = [0,None]
     for m in cand_meshes:
         ratio = test_alignment(body, m)
-        print(m, ratio)
-        #ok = excise_neuter_mesh(body, m)
+        #print(m, ratio)
         if ratio>fit_mesh[0] or fit_mesh[1] is None:
             fit_mesh = [ratio, m]
 
-    #return
-    print("Fit:", fit_mesh)
+    #print("Fit:", fit_mesh)
     #    if fit_mesh is None:
     #        print("None of the exhaust meshes is a perfect fit")
     #        bpy.ops.object.mode_set(mode='OBJECT')
@@ -1597,14 +1614,38 @@ def attach_exhaust(arm, body):
                 bpy.data.objects.remove(m)
         except:
             pass
-    #mesh = fit_mesh
 
     bpy.context.view_layer.objects.active = body
     bpy.ops.object.mode_set(mode='EDIT')
     bpy.ops.object.mode_set(mode='OBJECT')
     bpy.context.object.active_shape_key_index = 0
 
+    t1=time.time()
     uv_stitch(body, fit_mesh[1])
+    t2=time.time()
+    print("%.3f s to UV stitch" % (t2-t1))
+    """
+    bmd = bmesh.new()
+    bmd.from_mesh(body.data)
+    bmd.verts.ensure_lookup_table()
+    bmd.edges.ensure_lookup_table()
+    lay = bmd.loops.layers.uv['uv1']
+    exh = set(vgroup(body, 'cf_J_ExhaustValve'))
+    for x in set(vgroup(body, ["cf_J_Kosi02_s", "cf_J_Ana"])) - exh:
+        uv = bmd.verts[x].link_loops[0][lay].uv
+        r = (uv-Vector([0.126,0.498])).length / 0.006
+        if r<2.0:
+            r = 0.5*sigmoid(r, 1.0, 2.0)
+            w=0
+            for g in body.data.vertices[x].groups:
+                if '_Ana' in body.vertex_groups[g.group].name:
+                    w += g.weight
+            set_weight(body, x, 'cf_J_ExhaustValve', w*r)
+            for g in body.data.vertices[x].groups:
+                if '_Ana' in body.vertex_groups[g.group].name:
+                    g.weight = 1-r
+    """
+
 
     bpy.context.view_layer.objects.active = body
     bpy.context.object.active_shape_key_index = 0
@@ -1641,10 +1682,8 @@ def attach_injector(arm, body):
     unparent(injector_sheath)
     parent_arm(arm, injector_mesh)
     parent_arm(arm, injector_sheath)
-    #return
     arm.select_set(True)
     injector.select_set(True)
-    #print("Joining", injector, "to", arm)
     bpy.context.view_layer.objects.active = arm
     bpy.ops.object.join()
 
@@ -1723,8 +1762,6 @@ def attach_injector(arm, body):
     body.data.update()
     t2=time.time()
     print("%.3f s to attach injector" % (t2-t1))
-    # can't join because I want to be able to turn it on and off
-    #join_meshes([body.name, injector_sheath.name])
 
 def paint_scalp(arm, body):
     vg=body.vertex_groups.new(name="Scalp")
@@ -1799,8 +1836,6 @@ def paint_nostrils_v1(arm, body):
         'cf_J_Nostril_L','cf_J_Nostril_R',
         'cf_J_Nose_Septum', 'cf_J_NoseBase_s'])
 
-    nl = 0
-    print(len(v), "candidate nostril verts")
     boy = (body['Boy']>0.0)
     uv_skew = 0.0 if boy else 0.7
     for x in v:
@@ -1932,8 +1967,7 @@ def paint_nostrils(arm, body):
         'cf_J_Nostril_L','cf_J_Nostril_R',
         'cf_J_Nose_Septum', 'cf_J_NoseBase_s'])
 
-    nl = 0
-    print(len(v), "candidate nostril verts")
+    #print(len(v), "candidate nostril verts")
     boy = (body['Boy']>0.0)
     uv_skew = 0.0 if boy else 0.7
     for x in v:
@@ -1963,12 +1997,11 @@ def paint_nostrils(arm, body):
         w_nose_wr = get_weight(body, x, id_wr)
         w_nose_base = get_weight(body, x, id_base)
         w_nose_tip = get_weight(body, x, id_t)
-        #w_nose_bridge2 = get_weight(body, x, id_b)
 
         effect = wtl+wtr+wtc
 
-        transfer_tt_base = sigmoid(uv[1], 0.395, 0.420)#+sigmoid(uv[1], 0.475, 0.450)
-        transfer_base_tt = sigmoid(uv[1], 0.475, 0.450)#+sigmoid(uv[1], 0.475, 0.450)
+        transfer_tt_base = sigmoid(uv[1], 0.395, 0.420)
+        transfer_base_tt = sigmoid(uv[1], 0.475, 0.450)
 
         w_nose_t, w_nose_base = w_nose_t-w_nose_t*transfer_tt_base+w_nose_base*transfer_base_tt, w_nose_base+w_nose_t*transfer_tt_base-+w_nose_base*transfer_base_tt
 
@@ -2069,3 +2102,18 @@ def repaint_upper_neck(arm, body):
         set_weight(body, x, "cf_J_FaceRoot_s", w*(1.-sigmoid(z, 0, span))*(1.-rear_ratio))
         set_weight(body, x, "cf_J_FaceRoot_r_s", w*(1.-sigmoid(z, 0, span))*rear_ratio)
 
+def insert_adapter_bone(arm, bone, adapter_name):
+    old_parent = arm.data.bones[bone].parent
+    make_child_bone(arm, old_parent.name, adapter_name, Vector([0,0,0]), 'Correctives')
+    bpy.ops.object.mode_set(mode='EDIT')
+    arm.data.edit_bones[bone].parent = arm.data.edit_bones[adapter_name]
+
+def add_helper_jc_bones(arm):
+    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.context.view_layer.objects.active = arm
+    for s in 'L','R':
+        insert_adapter_bone(arm, 'cf_J_LegUp01_s_'+s, 'cf_J_LegUp01_dam_'+s)
+        insert_adapter_bone(arm, 'cf_J_LegUp02_s_'+s, 'cf_J_LegUp02_dam_'+s)
+        insert_adapter_bone(arm, 'cf_J_LegLow01_s_'+s, 'cf_J_LegLow01_dam_'+s)
+        insert_adapter_bone(arm, 'cf_J_LegLow02_s_'+s, 'cf_J_LegLow02_dam_'+s)
+    bpy.ops.object.mode_set(mode='OBJECT')

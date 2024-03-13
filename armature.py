@@ -211,6 +211,11 @@ bone_classes={
 'cf_J_Neck': 'f',
 'cf_J_Head': 'f',
 
+'cf_J_LegUp01_dam_': 'ccccccc',
+'cf_J_LegUp02_dam_': 'ccccccc',
+'cf_J_LegLow01_dam_': 'ccccccc',
+'cf_J_LegLow02_dam_': 'ccccccc',
+
 #Mune00 is Scale 1, Mune01 is Scale 2, Mune02 is Scale 3, Mune03 is Tip Scale, Mune04 is Areola Scale
 'cf_J_Mune00_': 'iiiuxxx',
 'cf_J_Mune00_t_':'sssssss',
@@ -413,10 +418,14 @@ def copy_scale(arm, c, comps='xyz'):
     bone.lock_scale[2]=True
 
 def delete_driver(arm, target_bone, target_prop, target_component):
+    if not target_bone in arm.pose.bones:
+        return
     arm.pose.bones[target_bone].driver_remove(target_prop, target_component)
 
 def drive(arm, target_bone, target_prop, target_component,
         driver_bone, driver_prop, formula, order='AUTO'):
+    if not target_bone in arm.pose.bones:
+        return
     d=arm.pose.bones[target_bone].driver_remove(target_prop, target_component)
     d=arm.pose.bones[target_bone].driver_add(target_prop, target_component)
     var=d.driver.variables.new()
@@ -432,6 +441,8 @@ def drive2(arm, target_bone, target_prop, target_component,
         driver_bone1, driver_prop1, 
         driver_bone2, driver_prop2, 
         formula, order='AUTO'):
+    if not target_bone in arm.pose.bones:
+        return
     arm.pose.bones[target_bone].driver_remove(target_prop, target_component)
     d=arm.pose.bones[target_bone].driver_add(target_prop, target_component)
     var=d.driver.variables.new()
@@ -700,6 +711,7 @@ def prettify_armature(arm, body):
             'cf_J_LegUp00_', 'cf_J_LegLow01_', 
             'cf_J_Foot01_', 'cf_J_Foot02_', 
             ):
+            """
             if c=='cf_J_LegUp01_s_':
                 copy_scale(arm, c, comps='xy')
             elif c=='cf_J_LegUp02_s_':
@@ -712,8 +724,9 @@ def prettify_armature(arm, body):
                 copy_scale(arm, c, comps='xyz')
                 copy_location(arm, c, comps='xy')
             else:
-                copy_scale(arm, c)
-                copy_location(arm, c)
+            """
+            copy_scale(arm, c)
+            copy_location(arm, c)
             if (c[-1]=='_' and '_s_' in c) or (c in ['cf_J_NoseWing_tx_', 'cf_J_Eye_t_',  'cf_J_EarLow_', 'cf_J_EarUp_',
                 'cf_J_CheekLow_', 'cf_J_CheekUp_', 'cf_J_CheekMid_']):
                 copy_rotation(arm, c+'R')
@@ -795,24 +808,17 @@ def delete_drivers(arm):
         delete_driver(arm, 'cf_J_ArmElbo_dam_01_'+s, 'location', 2)
         delete_driver(arm, 'cf_J_SiriDam_'+s, 'location', 1)
         delete_driver(arm, 'cf_J_SiriDam_'+s, 'location', 2)
-        delete_driver(arm, 'cf_J_LegUp01_s_'+s, 'location', 1)
-        delete_driver(arm, 'cf_J_LegUp01_s_'+s, 'location', 2)
-        delete_driver(arm, 'cf_J_LegUp01_s_'+s, 'scale', 2)
-        delete_driver(arm, 'cf_J_LegUp01_s_'+s, 'location', 0)
-        delete_driver(arm, 'cf_J_LegUp02_s_'+s, 'scale', 0)
-        delete_driver(arm, 'cf_J_LegUp02_s_'+s, 'scale', 2)
-        delete_driver(arm, 'cf_J_LegLow01_s_'+s, 'location', 2)
-        delete_driver(arm, 'cf_J_LegLow02_s_'+s, 'location', 2)
-        delete_driver(arm, 'cf_J_LegUp02_s_'+s, 'location', 2)
+        delete_driver(arm, 'cf_J_LegUp01_dam_'+s, 'location', 1)
+        delete_driver(arm, 'cf_J_LegUp01_dam_'+s, 'location', 2)
+        delete_driver(arm, 'cf_J_LegUp01_dam_'+s, 'scale', 2)
+        delete_driver(arm, 'cf_J_LegUp01_dam_'+s, 'location', 0)
+        delete_driver(arm, 'cf_J_LegUp02_dam_'+s, 'scale', 0)
+        delete_driver(arm, 'cf_J_LegUp02_dam_'+s, 'scale', 2)
+        delete_driver(arm, 'cf_J_LegLow01_dam_'+s, 'location', 2)
+        delete_driver(arm, 'cf_J_LegLow02_dam_'+s, 'location', 2)
+        delete_driver(arm, 'cf_J_LegUp02_dam_'+s, 'location', 2)
 
-def set_drivers(arm):
-    save_scale = str(arm.pose.bones['cf_J_LegUp01_s_L'].scale[2])
-    save_scale_2x = str(arm.pose.bones['cf_J_LegUp02_s_L'].scale[0])
-    save_scale_2z = str(arm.pose.bones['cf_J_LegUp02_s_L'].scale[2])
-
-    save_legup01_x = str(-arm.pose.bones['cf_J_LegUp01_s_L'].location[0])
-    save_scale_legup01_x = str(arm.pose.bones['cf_J_LegUp01_s_L'].scale[0])
-
+def set_drivers(arm, extend_safe):
     for s,sgn in (('L','-'),('R','')):
         # when twisting ArmUp00 (twist = along its length), gradient the effect from shoulder to elbow
         drive(arm, 'cf_J_ArmUp01_dam_' + s, 'rotation_euler', 0, 'cf_J_ArmUp00_'+s, 'ROT_X', '-0.75*var', order='SWING_TWIST_X') # changed from game -0.66
@@ -823,6 +829,9 @@ def set_drivers(arm):
         drive(arm, 'cf_J_LegUp01_' + s, 'rotation_euler', 1, 'cf_J_LegUp00_'+s, 'ROT_Y', '-0.85*var', order='SWING_TWIST_Y')
         drive(arm, 'cf_J_LegUp02_' + s, 'rotation_euler', 1, 'cf_J_LegUp00_'+s, 'ROT_Y', '-0.5*var', order='SWING_TWIST_Y')
         arm.pose.bones['cf_J_ArmUp00_'+s].rotation_mode='XYZ'
+
+        if not extend_safe:
+            return
 
         drive(arm, 'cf_J_ArmElboura_dam_'+s, 'location', 2, 'cf_J_ArmLow01_'+s, 'ROT_Y', "-clamp("+sgn+"var-2,0,1)*0.5")
         drive(arm, 'cf_J_ArmElboura_dam_'+s, 'scale', 1, 'cf_J_ArmLow01_'+s, 'ROT_Y', "1+clamp("+sgn+"var-2,0,1)")
@@ -835,35 +844,33 @@ def set_drivers(arm):
         drive2(arm, 'cf_J_SiriDam_'+s, 'location', 2, formula=corrective+"*0.9", **kwargs)
 
         # optimal values vary a bit from char to char
-        drive2(arm, 'cf_J_LegUp01_s_'+s, 'location', 1, formula=corrective+"*0.6", **kwargs)
-        drive2(arm, 'cf_J_LegUp01_s_'+s, 'location', 2, formula=corrective+"*-0.9", **kwargs) 
-        drive2(arm, 'cf_J_LegUp01_s_'+s, 'scale', 2, formula=save_scale+"+"+corrective+"*-0.3", **kwargs)
+        drive2(arm, 'cf_J_LegUp01_dam_'+s, 'location', 1, formula=corrective+"*0.6", **kwargs)
+        drive2(arm, 'cf_J_LegUp01_dam_'+s, 'location', 2, formula=corrective+"*-0.9", **kwargs) 
+        drive2(arm, 'cf_J_LegUp01_dam_'+s, 'scale', 2, formula="1+"+corrective+"*-0.3", **kwargs)
 
         # Corrective that kicks in when the leg is simultaneously lifted and bent toward center, especially when it's lifted more than 45 degrees.
         # Push the upper thigh slightly out to minimize clipping the belly and the pubic bone
-        drive2(arm, 'cf_J_LegUp01_s_'+s, 'location', 0, formula=sgn+"1*"+save_legup01_x+"+clamp(-var,0,1)*max("+sgn+"var_001,0)*1.0", **kwargs)
+        drive2(arm, 'cf_J_LegUp01_dam_'+s, 'location', 0, formula="clamp(-var,0,1)*max("+sgn+"var_001,0)*1.0", **kwargs)
 
         # Corrective that kicks in when knee is bent past ~110 degrees.
         # "Squish" the lower thigh (scale_x up, scale_z down) when the calf is pressed against the lower thigh.
         # Additionally, widen the entire thigh when we're sharply twisting the thigh bone (see Yoga pose for impact:
         # without this corrective, lower thigh looks weird there)
-        corrective="clamp(abs(var_001)-1.0,0,0.5)+max(var-2.5,0)"
+        corrective="1+clamp(abs(var_001)-1.0,0,0.5)+max(var-2.5,0)"
         kwargs={"driver_bone1":"cf_J_LegLow01_"+s, "driver_prop1":"ROT_X", "driver_bone2": "cf_J_LegUp00_"+s, "driver_prop2": "ROT_Y", "order": "SWING_TWIST_Y"}
-        drive2(arm, 'cf_J_LegUp02_s_'+s, 'scale', 0, formula=save_scale_2x+"+"+corrective+"*1.5", **kwargs)
-        drive2(arm, 'cf_J_LegUp02_s_'+s, 'scale', 2, formula=save_scale_2z+"+"+corrective+"*-1.5", **kwargs)
+        drive2(arm, 'cf_J_LegUp02_dam_'+s, 'scale', 0, formula=corrective+"*1.5", **kwargs)
+        drive2(arm, 'cf_J_LegUp02_dam_'+s, 'scale', 2, formula=corrective+"*-1.5", **kwargs)
 
         corrective="max(var-2.5,0)"
         kwargs={"driver_bone":"cf_J_LegLow01_"+s, "driver_prop":"ROT_X"}
 
         # In response, lower thigh pushes the flesh of the calf.
-        pos = str(arm.pose.bones["cf_J_LegLow01_s_L"].location[2])
-        drive(arm, 'cf_J_LegLow01_s_'+s, 'location', 2, formula=pos+"+"+corrective+"*0.9", **kwargs)
-        pos = str(arm.pose.bones["cf_J_LegLow02_s_L"].location[2])
-        drive(arm, 'cf_J_LegLow02_s_'+s, 'location', 2, formula=pos+"+"+corrective+"*0.5", **kwargs)
+        drive(arm, 'cf_J_LegLow01_dam_'+s, 'location', 2, formula=corrective+"*0.9", **kwargs)
+        drive(arm, 'cf_J_LegLow02_dam_'+s, 'location', 2, formula=corrective+"*-0.5", **kwargs)
 
         # Lower part of the thigh responds to two different correctives. It can be pushed forward by a sharply bent knee, and backward by a sharply bent thigh.
         # TODO: this does not work correctly when the thigh is sharply twisted (see: Yoga), because it pushes in the wrong direction.
-        drive2(arm, 'cf_J_LegUp02_s_'+s, 'location', 2, 'cf_J_LegUp00_'+s, 'ROT_X', "cf_J_LegLow01_"+s, "ROT_X", "max(-var-1.5,0)*-0.6+max(var_001-2.25,0)*1.0", order='SWING_TWIST_Y')
+        drive2(arm, 'cf_J_LegUp02_dam_'+s, 'location', 2, 'cf_J_LegUp00_'+s, 'ROT_X', "cf_J_LegLow01_"+s, "ROT_X", "max(-var-1.5,0)*-0.6+max(var_001-2.25,0)*1.0", order='SWING_TWIST_Y')
 
 def add_ik(arm):
     bpy.ops.object.mode_set(mode='OBJECT')  

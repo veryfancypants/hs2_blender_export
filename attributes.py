@@ -146,16 +146,17 @@ def set_attr(name, x):
     if name=='Exhaust':
         if not 'cf_J_ExhaustClench' in h.pose.bones:
             return
-        if x<=1:
-            h.pose.bones['cf_J_ExhaustClench'].scale=Vector([-2+3*x,1,-2+3*x])
-            h.pose.bones['cf_J_Ana'].scale = Vector([1,1,1])
-            h.pose.bones['cf_J_ExhaustValve'].scale=Vector([1,1,1])
-        else:
-            h.pose.bones['cf_J_Ana'].scale = Vector([max(x/2,1),1,max(x/3,1)])
-            h.pose.bones['cf_J_ExhaustClench'].scale=Vector([max(x/3,1),1,max(x/3,1)])
-            h.pose.bones['cf_J_ExhaustValve'].scale=Vector([max(x/5,1),1,max(x/5,1)])
-        h.pose.bones['cf_J_ExhaustClench'].location=Vector([0.008*(max(x/3,1)-1), 0, 0])
-        h.pose.bones['cf_J_ExhaustValve'].location=Vector([0.008*(max(x/3,1)-1), 0, 0])
+        h.pose.bones['cf_J_ExhaustClench'].scale=Vector([min(1,-2+3*x),1,min(1,-2+3*x)])
+
+        w = max(x-1,0)
+        h.pose.bones['cf_J_Ana'].scale = Vector([1+w*0.1,1,1+w*0.1])
+        h.pose.bones['cf_J_ExhaustValve'].scale=Vector([1+w*0.5,1,1+w*0.15])
+        h.pose.bones['cf_J_ExhaustValve'].location=Vector([0, 0, -0.002*w])
+        h.pose.bones['cf_J_Exhaust'].scale=Vector([1,1,1])
+        #h.pose.bones['cf_J_ExhaustValve'].rotation_euler[0]=max(0.0, (x-1)*0.04)
+        #h.pose.bones['cf_J_ExhaustClench'].location=Vector([0,0.02*max(x-1,0), 0])
+        #h.pose.bones['cf_J_ExhaustValve'].location=Vector([0,0,-0.0035*max(x-1,0)])
+        h.pose.bones['cf_J_Exhaust'].location=Vector([-0.002*w, 0, 0])
 
     if name=="IK":
         ik_affected_bones = ['cf_J_ArmUp00_', 'cf_J_ArmLow01_', 'cf_J_Hand_', 'cf_J_LegLow01_', 'cf_J_LegUp01_', 'cf_J_Foot01_',

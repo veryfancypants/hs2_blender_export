@@ -206,21 +206,16 @@ def test_inverted_bump_map(tex_pixels):
     return True
 
 def estimate_bump_gamma(tex, v):
-    # Fast copy of pixel data from bpy.data to numpy array.
-    # (Naively doing 'np.array(tex.pixels)' can take as long as 15 s for an 8k texture)
-    #v = np.zeros((tex.size[0]*tex.size[1], 4), 'f')
-    #tex.pixels.foreach_get(v.ravel())
     if tex.size[0]>=1024 or tex.size[1]>=1024:
         #v = v.reshape([tex.size[0], tex.size[1], 4])
         v = v[::max(1,tex.size[0]//512), ::max(1,tex.size[1]//512), :]
     v = v.reshape([-1, 4])
     averages = np.median(v, axis=0)
-    #print("Bump texture", tex.filepath, tex.size[0], tex.size[1], "%.5f %.5f" % (averages[0], averages[1]))
-
+    #print("Bump texture", tex.filepath, tex.size[0], tex.size[1], "%.5f %.5f %.5f" % (averages[0], averages[1], averages[2]))
     bump_gamma_r = 1.0
     bump_gamma_g = 1.6
-    if averages[0]==1.0 or averages[1]==1.0:
-        print("ERROR: ", tex.filepath, "is not a normal map!")
+    if averages[0]==1.0 or averages[1]==1.0 or averages[0]<0.1 or averages[1]<0.1:
+        print("ERROR: ", tex.filepath, "is not a normal map! (Averages %.5f %.5f %.5f)" % (averages[0], averages[1], averages[2]))
         return 0.0, 0.0
 
     if (averages[0]>0.47 and averages[0]<0.53) and \
@@ -245,6 +240,8 @@ def set_bump(obj, node, x, y):
     disable = False
     tex_pixels = None
     if tex is not None:
+        # Fast copy of pixel data from bpy.data to numpy array.
+        # (Naively doing 'np.array(tex.pixels)' can take as long as 15 s for an 8k texture)
         tex_pixels = np.zeros((tex.size[0]*tex.size[1], 4), 'f')
         tex.pixels.foreach_get(tex_pixels.ravel())
         tex_pixels = tex_pixels.reshape([tex.size[1], tex.size[0], 4])
@@ -254,6 +251,10 @@ def set_bump(obj, node, x, y):
             print("Bump texture", tex.filepath, tex.size[0], tex.size[1])
             print("Mislabeled BumpMap textures detected: fixing...")
         tex = set_tex(obj, node, x, 'BumpMap'+y, csp='Non-Color')
+        if tex is not None:
+            tex_pixels = np.zeros((tex.size[0]*tex.size[1], 4), 'f')
+            tex.pixels.foreach_get(tex_pixels.ravel())
+            tex_pixels = tex_pixels.reshape([tex.size[1], tex.size[0], 4])
 
 
     gamma_r = 'Bump gamma ' + y + 'R'
@@ -318,18 +319,36 @@ def load_textures(arm, body, hair_color, eye_color, suffix):
     #if hair_color!=None:
     eyelash_mat.node_tree.nodes['RGB'].outputs[0].default_value = hair_color
 
-    eye_mat = bpy.data.materials['Eyes'].copy()
-    replace_mat(eyebase_L, eye_mat, 'Eyes_' + suffix)
-    replace_mat(eyebase_R, eye_mat, 'Eyes_' + suffix)
-    set_tex(eyebase_L, 'Image Texture', 'eye', 'MainTex', csp='Non-Color')    
-    set_tex(eyebase_L, 'Image Texture.001', 'eye', 'Texture2', csp='Non-Color')    
-    set_tex(eyebase_L, 'Image Texture.002', 'eye', 'Texture3', csp='Non-Color')    
-    tex = set_tex(eyebase_L, 'Image Texture.003', 'eye', 'Texture4', csp='Non-Color')    
-    tex4px0 = [tex.pixels[0], tex.pixels[1], tex.pixels[2]]
-    if tex4px0[0]<0.01 and tex4px0[1]>0.99 and tex4px0[2]<0.01:
-        disconnect_link(eye_mat, 'Image Texture.003')
-    #if eye_color!=None:
-    eye_mat.node_tree.nodes['RGB'].outputs[0].default_value = eye_color
+    if find_tex('eye', 'ShadeIrisTex') is not None:
+        eye_mat = bpy.data.materials['Eyes2'].copy()
+        replace_mat(eyebase_L, eye_mat, 'Eyes_' + suffix)
+        replace_mat(eyebase_R, eye_mat, 'Eyes_' + suffix)
+        set_tex(eyebase_L, 'ShadeIrisTex', 'eye', 'ShadeIrisTex', csp='Non-Color')    
+        set_tex(eyebase_L, 'ShadeScleraTex', 'eye', 'ShadeScleraTex', csp='Non-Color')    
+        set_tex(eyebase_L, 'IrisTex', 'eye', 'IrisTex')
+        set_tex(eyebase_L, 'MainTex', 'eye', 'MainTex')
+        set_tex(eyebase_L, 'Texture2', 'eye', 'Texture2', csp='Non-Color')    
+        set_tex(eyebase_L, 'Texture2 copy', 'eye', 'Texture2', csp='Non-Color')    
+        set_tex(eyebase_L, 'Texture3', 'eye', 'Texture3', csp='Non-Color')    
+        set_tex(eyebase_L, 'Texture4', 'eye', 'Texture4', csp='Non-Color')    
+        #tex4px0 = [tex.pixels[0], tex.pixels[1], tex.pixels[2]]
+        #if tex4px0[0]<0.01 and tex4px0[1]>0.99 and tex4px0[2]<0.01:
+        #    disconnect_link(eye_mat, 'Image Texture.003')
+        #if eye_color!=None:
+        eye_mat.node_tree.nodes['RGB'].outputs[0].default_value = eye_color
+    else:
+        eye_mat = bpy.data.materials['Eyes'].copy()
+        replace_mat(eyebase_L, eye_mat, 'Eyes_' + suffix)
+        replace_mat(eyebase_R, eye_mat, 'Eyes_' + suffix)
+        set_tex(eyebase_L, 'Image Texture', 'eye', 'MainTex', csp='Non-Color')    
+        set_tex(eyebase_L, 'Image Texture.001', 'eye', 'Texture2', csp='Non-Color')    
+        set_tex(eyebase_L, 'Image Texture.002', 'eye', 'Texture3', csp='Non-Color')    
+        tex = set_tex(eyebase_L, 'Image Texture.003', 'eye', 'Texture4', csp='Non-Color')    
+        tex4px0 = [tex.pixels[0], tex.pixels[1], tex.pixels[2]]
+        if tex4px0[0]<0.01 and tex4px0[1]>0.99 and tex4px0[2]<0.01:
+            disconnect_link(eye_mat, 'Image Texture.003')
+        #if eye_color!=None:
+        eye_mat.node_tree.nodes['RGB'].outputs[0].default_value = eye_color
     body["eye_mat"]=eye_mat
 
     head_mat=replace_mat(head, bpy.data.materials['Head'].copy(), 'Head_' + suffix)
@@ -1061,19 +1080,32 @@ def import_body(input, refactor,
         if add_exhaust and refactor:
             add_extras.attach_exhaust(arm, body)
 
-        # If there's no cf_J_FaceUp_tz, it's a custom head and most of this would not work anyway
-        if 'cf_J_FaceUp_tz' in body.vertex_groups:
+        custom_head = False
+        for vg in ['cf_J_CheekLow_L', 'cf_J_Nose_t', 'cf_J_Mouthup', 'cf_J_FaceUp_tz']:
+            if not vg in body.vertex_groups:
+                custom_head = True
+
+        # On a custom head, the UV map is typically different, and we don't know where to draw eyebrows
+        # The choice is between drawing them and hoping for the best (even though they might be on the cheeks),
+        # or hiding them.
+        if custom_head:
+            body["head_mat"].node_tree.nodes["Eyebrow scale"].outputs[0].default_value = 0.0
+
+        if do_extend_safe:
+            add_extras.add_helper_jc_bones(arm)
+            add_extras.add_spine_rear_soft(arm, body)
+
+
+        if not custom_head:
             if do_extend_safe:
                 # Add a number of new customization shape keys.
                 add_extras.add_shape_keys(arm, body, do_extend_full)
-
                 # Reversible mods.
                 # This splits a number of VGs and adds a number of bones, but in such a manner that, with new bones in null pose,
                 # the result should be virtually identical to unmodified mesh
                 # (slight changes are expected, because new bones are slightly offset from their parents for posing convenience,
                 # but they should be minimal).
                 add_extras.add_skull_soft_neutral(arm, body)
-                add_extras.add_spine_rear_soft(arm, body)
 
                 # This is irreversible but harmless (fixing upper/lower lip identifications.)
                 add_extras.repaint_mouth_minimal(arm, body)
@@ -1081,12 +1113,22 @@ def import_body(input, refactor,
             # Irreversible mods (unique or fundamentally changed VGs)
             if do_extend_full and 'cf_J_FaceUp_tz' in body.vertex_groups:
                 # Repaint nose bridge to forehead transition
+                t1 = time.time()
                 add_extras.repaint_nose_bridge(arm, body)
+                t2 = time.time()
+                print("Repaint nose bridge: %.3f s" % (t2-t1))
+                t1=t2
                 # Repaint upper neck to lower skull transition
                 add_extras.repaint_upper_neck(arm, body)
+                t2 = time.time()
+                print("Repaint upper neck: %.3f s" % (t2-t1))
+                t1=t2
                 # Eliminate cf_J_FaceLow_s, reassigning all its weights to other VGs
                 # Add two new bones to control nose-cheek and nasolabial fold areas
                 add_extras.repaint_face(arm, body)
+                t2 = time.time()
+                print("Repaint face: %.3f s" % (t2-t1))
+                t1=t2
                 # Add bones and VGs for nostrils and nasal septum
                 add_extras.add_nostrils(arm, body)
 
@@ -1166,7 +1208,7 @@ def import_body(input, refactor,
             load_customization_from_string(arm, customization)
 
         # Finally, set drivers (they need final values of all shape parameters)
-        armature.set_drivers(arm)
+        armature.set_drivers(arm, do_extend_safe)
         t2=time.time()
         print("Attributes done in %.3f s" % (t2-t1))
         t1=t2

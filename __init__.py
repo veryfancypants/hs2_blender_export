@@ -11,7 +11,20 @@ import json
 import hashlib
 import uuid
 
-analyzer_enabled = False
+analyzer_enabled = True
+
+try:
+    analyzer_py = os.path.dirname(__file__)+"/analyzer.py"
+    print(analyzer_py)
+    f=open(analyzer_py, "r")
+    print(f)
+    f.close()
+    analyzer_enabled = True
+except:
+    analyzer_enabled = False
+
+if analyzer_enabled:
+    from . import analyzer
 
 from .armature import (
     reshape_armature, 
@@ -43,8 +56,8 @@ from bpy.types import (
 bl_info = {
     "name": "HS2 character importer",
     "author": "",
-    "version": (1, 0, 0),
-    "blender": (4, 0, 0),
+    "version": (1, 0, 240312),
+    "blender": (4, 0, 2),
     "description": "HS2 character importer",
     "tracker_url": "",
     "doc_url": "",
@@ -294,7 +307,6 @@ def preset_update(self, context):
         waifus_path = export_dir
         presets_dirty = True
 
-    current = int(bpy.context.scene.hs2rig_data.presets)
     v = attributes.collect_mat_attributes()
     p = find_preset(hs2object())
     if p is not None:
@@ -560,7 +572,7 @@ class hs2rig_props(PropertyGroup):
         default="Auto", 
         description="Add a prefabricated injector and attempt to stitch it onto the mesh")
     add_exhaust: BoolProperty(name="Add an exhaust", default=True, description="Add a prefabricated exhaust port and attempt to stitch it onto the mesh")
-    wipe: BoolProperty(name="Wipe scene before import", default=True,
+    wipe: BoolProperty(name="Wipe scene before import", default=False,
         description="When checked, all existing objects will be deleted from the scene before the new character is added")
 
     #
@@ -684,7 +696,7 @@ class hs2rig_OT_reset_cust(Operator):
             print(preset_map[p])
             if preset_map[p]["uuid"]==h["preset_uuid"]:
                 importer.reset_customization(h)
-                armature.set_drivers(h)
+                #armature.set_drivers(h)
         return {'FINISHED'}
 
 class hs2rig_OT_load_cust(Operator):
@@ -697,7 +709,7 @@ class hs2rig_OT_load_cust(Operator):
         p = find_preset(h)
         if p is not None:
             importer.load_customization_from_string(h, p.get("customization") or "")
-            armature.set_drivers(h)
+            #armature.set_drivers(h)
         return {'FINISHED'}
 
 class hs2rig_OT_save_cust(Operator):
@@ -765,7 +777,7 @@ class hs2rig_OT_clothing(Operator):
 
 class hs2rig_OT_load_preset_character(Operator):
     bl_idname = "object.load_preset_character"
-    bl_label = "Load preset character"
+    bl_label = "Load preset char"
     bl_description = "Load preset character"
     bl_options = {'REGISTER', 'UNDO'}
     
@@ -877,7 +889,12 @@ class hs2rig_OT_import(DirSelector):
         uuid = None
         eye_color = (0.0, 0.0, 0.8)
         hair_color = (0.8, 0.8, 0.5)
-
+        s = self.filepath
+        while len(s) and (s[-1]=='/' or s[-1]=='\\'):
+            s=s[:-1]
+        name = os.path.basename(s)
+        while len(name) and (name[0].isdigit() or name[0]=='_'):
+            name=name[1:]
         arm=importer.import_body(self.filepath,
             refactor=context.scene.hs2rig_data.refactor,
             do_extend_safe=context.scene.hs2rig_data.extend_safe,
@@ -888,7 +905,7 @@ class hs2rig_OT_import(DirSelector):
             wipe=context.scene.hs2rig_data.wipe,
             c_eye=eye_color,
             c_hair=hair_color,
-            name = os.path.basename(self.filepath),
+            name = name,
             customization = None
             )
         bpy.context.scene.hs2rig_data.standard_poses="T"
@@ -896,7 +913,7 @@ class hs2rig_OT_import(DirSelector):
 
 class hs2rig_OT_import_all(Operator):
     bl_idname = "object.import_all"
-    bl_label = "Load all preset characters"
+    bl_label = "Load all presets"
     bl_description = "Load all preset characters"
     bl_options = {'REGISTER', 'UNDO'}
     
@@ -1093,10 +1110,12 @@ class HS2RIG_PT_ui(Panel):
         if len(preset_map)==0:
             row.enabled=False
         row = box.row(align=True)
-        row.operator("object.load_preset_character")
-        row.operator("object.import_all")
+        row2 = row.row(align=True)
+        op = row2.operator("object.load_preset_character")
+        row2.operator("object.import_all")
         if len(preset_map)==0:
-            row.enabled=False
+            row2.enabled=False
+        row.operator("object.import")
 
         if analyzer_enabled:
             row = box.row(align=True)
@@ -1115,8 +1134,6 @@ class HS2RIG_PT_ui(Panel):
             row = box.row(align=True)
             op=row.prop_menu_enum(context.scene.hs2rig_data, "add_injector")
             op=row.prop(context.scene.hs2rig_data, "add_exhaust")
-        row = box.row(align=True)
-        row.operator("object.import")
         row = box.row(align=True)
         row.label(text=importer.last_import_status)
         if analyzer_enabled and context.scene.hs2rig_data.run_analyzer:
