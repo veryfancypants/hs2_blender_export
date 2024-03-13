@@ -72,6 +72,10 @@ This is probably a bug in Studio Neo (you may notice that the character has low-
 
 Edit the material for the item you want to fix and set 'Clothes damage' to 0 or -0.1.
 
+* The character has two pairs of eyebrows:
+
+This happens when one pair is drawn in the head texture and the other pair is overlayed by the shader. Go to head material shader settings and set "Eyebrow scale" to 0.
+
 ## NOTES
 
 To pose the character, go to "pose mode" on the armature, select layers, then select bones and rotate them with the mouse (click 'r' to go into rotation mode) or directly from the item transform window (top right corner of the 3D view panel).
