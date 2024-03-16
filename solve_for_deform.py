@@ -21,10 +21,7 @@ def np_solve(target, undeformed, np_mats):
     out = (out[:,:3]/out[:,3:]).reshape([-1])
     target.foreach_set("co", out)
 
-def fast_inverse(A):
-    return 
-
-# Given an object 'b' that is parented to an armature in a nontrivial pose, and a reference
+# Given an object 'b' that is parented to an armature 'arm' in a nontrivial pose, and a reference
 # object with the same number of vertices, deforms the rest position of 'b' until it matches 'b2' in pose position.
 def solve_for_deform(arm, b, b2):
     np_mats = np.zeros([len(b.data.vertices), 4, 4], dtype=np.float32)
@@ -36,6 +33,11 @@ def solve_for_deform(arm, b, b2):
             bone_mats[y.index] = arm.pose.bones[y.name].matrix_channel
     z=Matrix()
     z.zero()
+
+    # The effect of armature deformation on a vertex 'v' is
+    # v_.co = sum([g.weight * arm.pose.bones[b.vertex_groups[g.group].name].matrix_channel for g in v.groups]) @ v.co
+    # (assuming that vertex weights are normalized.)
+    # We calculate the sum and then invert the matrix.
     for x in range(len(b.data.vertices)):
         deform = z.copy()
         totwt = 0.0
@@ -47,6 +49,7 @@ def solve_for_deform(arm, b, b2):
         totwts[x,0,0] = totwt
         np_mats[x] = deform if totwt>0.0 else Matrix()
 
+    # an extra step is needed if the object is offset / rotated relative to the armature
     dm_fwd = np.array(b.matrix_local, dtype=np.float32)
     dm_inv = np.array(b.matrix_local.inverted(), dtype=np.float32)
     np_mats = np.array([np.linalg.inv(x) for x in np_mats]) * totwts

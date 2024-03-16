@@ -227,26 +227,38 @@ def push_mat_attributes(v):
     def push_input_attr(v, mat, name, node, input_name):
         if name in v:
             mat.node_tree.nodes[node].inputs[input_name].default_value = v[name]
-
-    v={}
-    head_mat = h["body"]["head_mat"]
+    body = h["body"]
+    head_mat = body["head_mat"]
     push_value_attr(v, head_mat, "Eyebrow scale",)
     push_value_attr(v, head_mat, "Eyebrow rotation")
     push_value_attr(v, head_mat, "Eyebrow X offset")
     push_value_attr(v, head_mat, "Eyebrow Y offset")
     push_value_attr(v, head_mat, "Eyebrow arch")
 
-    torso_mat = h["body"]["torso_mat"]
+    torso_mat = body["torso_mat"]
     push_value_attr(v, torso_mat, "Booby scale")
     push_input_attr(v, torso_mat, "Torso bump scale", "Shader", "Bump scale")
     push_input_attr(v, torso_mat, "Torso bump scale 2", "Shader", "Bump scale 2")
 
-    nails_mat = h["body"]["nails_mat"]
+    nails_mat = body["nails_mat"]
     push_input_attr(v, nails_mat, "Nail color", "Principled BSDF", "Base Color")
 
-    eye_mat = h["body"]["eye_mat"]
+    eye_mat = body["eye_mat"]
     push_value_attr(v, eye_mat, "Pupil size")
     push_value_attr(v, eye_mat, "Iris size")
+
+    for x in ["pore_depth", "pore_intensity", "pore_density", "Gloss", "Alternate skin"]:
+        if x in v:
+            if isinstance(body[x], float):
+                body[x] = float(v[x])
+            else:
+                body[x] = bool(v[x])
+
+    for x in ['Eye shape', 'Adams apple delete', 'Upper lip trough', 'Lip arch', 'Eyelid crease', 'Temple depress',
+        'Jaw soften', 'Jaw soften more']:
+        if x in body.data.shape_keys.key_blocks and x in v:
+            body.data.shape_keys.key_blocks[x].value = float(v[x])
+
 
 def collect_mat_attributes():
     h = hs2object()
@@ -258,36 +270,47 @@ def collect_mat_attributes():
     # deleted upon save
     def pull_value_attr(v, mat, name):
         val = mat.node_tree.nodes[name].outputs[0].default_value
-        v[name] =val
+        v[name] = val
 
     def pull_input_attr(v, mat, name, node, input_name):
         val = mat.node_tree.nodes[node].inputs[input_name].default_value
         print(mat, name, val)
-        v[name] =val
+        if isinstance(val, float):
+            v[name] = val
+        else:
+            v[name] = val[:]
 
     v={}
-    try:
-        #v["uuid"] = h["uuid"]
-        head_mat = h["body"]["head_mat"]
-        pull_value_attr(v, head_mat, "Eyebrow scale")
-        pull_value_attr(v, head_mat, "Eyebrow rotation")
-        pull_value_attr(v, head_mat, "Eyebrow X offset")
-        pull_value_attr(v, head_mat, "Eyebrow Y offset")
-        pull_value_attr(v, head_mat, "Eyebrow arch")
+    body = h["body"]
+    head_mat = body["head_mat"]
+    pull_value_attr(v, head_mat, "Eyebrow scale")
+    pull_value_attr(v, head_mat, "Eyebrow rotation")
+    pull_value_attr(v, head_mat, "Eyebrow X offset")
+    pull_value_attr(v, head_mat, "Eyebrow Y offset")
+    pull_value_attr(v, head_mat, "Eyebrow arch")
 
-        torso_mat = h["body"]["torso_mat"]
-        pull_value_attr(v, torso_mat, "Booby scale")
-        pull_input_attr(v, torso_mat, "Torso bump scale", "Shader", "Bump scale")
-        pull_input_attr(v, torso_mat, "Torso bump scale 2", "Shader", "Bump scale 2")
+    torso_mat = body["torso_mat"]
+    pull_value_attr(v, torso_mat, "Booby scale")
+    pull_input_attr(v, torso_mat, "Torso bump scale", "Shader", "Bump scale")
+    pull_input_attr(v, torso_mat, "Torso bump scale 2", "Shader", "Bump scale 2")
 
-        nails_mat = h["body"]["nails_mat"]
-        print("nails_mat", nails_mat)
-        pull_input_attr(v, nails_mat, "Nail color", "Principled BSDF", "Base Color")
+    nails_mat = body["nails_mat"]
+    #print("nails_mat", nails_mat)
+    pull_input_attr(v, nails_mat, "Nail color", "Principled BSDF", "Base Color")
 
-        eye_mat = h["body"]["eye_mat"]
-        pull_value_attr(v, eye_mat, "Pupil size")
-        pull_value_attr(v, eye_mat, "Iris size")
-    except:
-        pass
+    eye_mat = body["eye_mat"]
+    pull_value_attr(v, eye_mat, "Pupil size")
+    pull_value_attr(v, eye_mat, "Iris size")
 
+    for x in ["pore_depth", "pore_intensity", "pore_density", "Gloss", "Alternate skin"]:
+        if isinstance(body[x], float) or isinstance(body[x], bool):
+            v[x] = body[x]
+        else:
+            v[x] = [float(y) for y in body[x]]
+
+    for x in ['Eye shape', 'Adams apple delete', 'Upper lip trough', 'Lip arch', 'Eyelid crease', 'Temple depress',
+        'Jaw soften', 'Jaw soften more']:
+        if x in body.data.shape_keys.key_blocks:
+            v[x] = body.data.shape_keys.key_blocks[x].value
+    print(v)
     return v

@@ -341,7 +341,7 @@ def load_textures(arm, body, hair_color, eye_color, suffix):
         replace_mat(eyebase_L, eye_mat, 'Eyes_' + suffix)
         replace_mat(eyebase_R, eye_mat, 'Eyes_' + suffix)
         set_tex(eyebase_L, 'Image Texture', 'eye', 'MainTex', csp='Non-Color')    
-        set_tex(eyebase_L, 'Image Texture.001', 'eye', 'Texture2', csp='Non-Color')    
+        set_tex(eyebase_L, 'Image Texture.001', 'eye', 'Texture2')
         set_tex(eyebase_L, 'Image Texture.002', 'eye', 'Texture3', csp='Non-Color')    
         tex = set_tex(eyebase_L, 'Image Texture.003', 'eye', 'Texture4', csp='Non-Color')    
         tex4px0 = [tex.pixels[0], tex.pixels[1], tex.pixels[2]]
@@ -887,7 +887,6 @@ def load_customization(arm, custfn):
     load_customization_from_string(arm, f.decode('utf-8'))
 
 def fix_neck_loop(body):
-    return
     bpy.ops.object.mode_set(mode='OBJECT')
     bpy.context.view_layer.objects.active = body
     bmd = bmesh.new()
@@ -1083,6 +1082,7 @@ def import_body(input, refactor,
         custom_head = False
         for vg in ['cf_J_CheekLow_L', 'cf_J_Nose_t', 'cf_J_Mouthup', 'cf_J_FaceUp_tz']:
             if not vg in body.vertex_groups:
+                print(vg, "does not exist")
                 custom_head = True
 
         # On a custom head, the UV map is typically different, and we don't know where to draw eyebrows
@@ -1090,6 +1090,11 @@ def import_body(input, refactor,
         # or hiding them.
         if custom_head:
             body["head_mat"].node_tree.nodes["Eyebrow scale"].outputs[0].default_value = 0.0
+
+        try:
+            body.data.use_auto_smooth = False
+        except:
+            pass
 
         if do_extend_safe:
             add_extras.add_helper_jc_bones(arm)
@@ -1123,8 +1128,7 @@ def import_body(input, refactor,
                 t2 = time.time()
                 print("Repaint upper neck: %.3f s" % (t2-t1))
                 t1=t2
-                # Eliminate cf_J_FaceLow_s, reassigning all its weights to other VGs
-                # Add two new bones to control nose-cheek and nasolabial fold areas
+                # Add new bones to control nose-cheek and nasolabial fold areas
                 add_extras.repaint_face(arm, body)
                 t2 = time.time()
                 print("Repaint face: %.3f s" % (t2-t1))
@@ -1156,7 +1160,8 @@ def import_body(input, refactor,
         body["pore_depth"] = 1.0
         body["pore_intensity"] = 1.0
         body["pore_density"] = 1.0
-
+        body["Gloss"] = 0.1
+        body["Alternate skin"] = True
         body["patchy skin"] = [1.0, 1.0, 1.0]
 
         bpy.types.Object.skin_tone_shift = bpy.props.FloatVectorProperty(
@@ -1197,12 +1202,13 @@ def import_body(input, refactor,
         #if do_tweak_mouth:
         #    load_customization(arm, custfile2)
 
-        arm.pose.bones['cf_J_Mouth_L'].location = Vector([0,0,0])
-        arm.pose.bones['cf_J_Mouth_L'].rotation_euler = Euler([0,0,0])
-        arm.pose.bones['cf_J_Mouth_L'].scale = Vector([1,1,1])
-        arm.pose.bones['cf_J_Mouth_R'].location = Vector([0,0,0])
-        arm.pose.bones['cf_J_Mouth_R'].rotation_euler = Euler([0,0,0])
-        arm.pose.bones['cf_J_Mouth_R'].scale = Vector([1,1,1])
+        if 'cf_J_Mouth_L' in arm.pose.bones:
+            arm.pose.bones['cf_J_Mouth_L'].location = Vector([0,0,0])
+            arm.pose.bones['cf_J_Mouth_L'].rotation_euler = Euler([0,0,0])
+            arm.pose.bones['cf_J_Mouth_L'].scale = Vector([1,1,1])
+            arm.pose.bones['cf_J_Mouth_R'].location = Vector([0,0,0])
+            arm.pose.bones['cf_J_Mouth_R'].rotation_euler = Euler([0,0,0])
+            arm.pose.bones['cf_J_Mouth_R'].scale = Vector([1,1,1])
 
         if customization is not None:
             load_customization_from_string(arm, customization)

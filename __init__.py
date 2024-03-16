@@ -12,19 +12,30 @@ import hashlib
 import uuid
 
 analyzer_enabled = True
+normalizer_enabled = True
 
 try:
     analyzer_py = os.path.dirname(__file__)+"/analyzer.py"
     print(analyzer_py)
     f=open(analyzer_py, "r")
-    print(f)
     f.close()
     analyzer_enabled = True
 except:
     analyzer_enabled = False
 
+try:
+    normalizer_py = os.path.dirname(__file__)+"/normalizer.py"
+    f=open(normalizer_py, "r")
+    f.close()
+    normalizer_enabled = True
+except:
+    normalizer_enabled = False
+
 if analyzer_enabled:
     from . import analyzer
+
+if normalizer_enabled:
+    from . import normalizer
 
 from .armature import (
     reshape_armature, 
@@ -67,18 +78,6 @@ bl_info = {
     "category": "Object"
 }
 
-
-name='Unnamed'
-
-#
-#
-#  EYE/HAIR COLOR
-#
-#
-
-#eye_color=None
-#hair_color=None
-
 def hs2object():
     arm = bpy.context.active_object
     if arm is None:
@@ -93,7 +92,6 @@ def hs2object():
 
 stored_json_preset_map=""
 
-#preset_list=[]
 preset_map={}
 waifus_path=""
 presets_dirty = False
@@ -312,15 +310,6 @@ def preset_update(self, context):
     if p is not None:
         for x in v:
             p[x]=v[x]
-
-    #if current in preset_map:
-    #    s = bpy.context.scene.hs2rig_data.char_name
-    #    if preset_map[current].name != s:
-    #        preset_map[current].name = s
-    #        #preset_list[current]=(str(current),s,preset_map[current]["uuid"],current)
-    #        presets_dirty = True
-    #    #if preset_map[current].set_path(bpy.context.scene.hs2rig_data.dump_dir[:]):
-    #    #    presets_dirty = True
 
 def save_presets():
     global presets_dirty
@@ -682,7 +671,10 @@ class hs2rig_OT_execute(Operator):
     def execute(self, context):
         arm = hs2object()
         if arm is not None:
-            getattr(add_extras, context.scene.hs2rig_data.command)(arm, arm["body"])
+            if context.scene.hs2rig_data.command == 'eye_shape':
+                add_extras.eye_shape(arm, arm["body"], None)
+            else:
+                getattr(normalizer, context.scene.hs2rig_data.command)(arm, arm["body"])
         return {'FINISHED'}
 
 class hs2rig_OT_reset_cust(Operator):
@@ -720,7 +712,9 @@ class hs2rig_OT_save_cust(Operator):
     def execute(self, context):
         h = hs2object()
         s = importer.customization_string(h, "cf_N_height")
+        print("New customization string", s)
         p = find_preset(h)
+        print("Preset", p)
         if p is not None:
             p["customization"]=s
         return {'FINISHED'}
@@ -1194,8 +1188,8 @@ def register():
     importlib.reload(attributes)
     importlib.reload(importer)
     importlib.reload(armature)
-    try:
+    if analyzer_enabled:
         importlib.reload(analyzer)
-    except:
-        pass
+    if normalizer_enabled:
+        importlib.reload(normalizer)
     importlib.reload(solve_for_deform)

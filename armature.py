@@ -253,6 +253,7 @@ bone_classes={
 
 'cf_J_CheekLow_': 'sssssss',
 'cf_J_CheekUp_': 'sssssss',
+'cf_J_CheekUp2_': 'sssssss',
 'cf_J_CheekMid_': 'sssssss',
 
 'cf_J_Chin_rs': 'xssssss', # despite the name, controls the entire lower jaw; limited rotation
@@ -260,6 +261,7 @@ bone_classes={
 'cf_J_ChinLow': 'xsxxsss',
 'cf_J_ChinFront_s': 'xssssss',
 'cf_J_ChinFront2_s': 'xssssss',
+'cf_J_ChinCheek_s': 'xssssss',
 
 'cf_J_MouthBase_tr': 'xssxsss', # 'mouth height', 'mouth depth'
 'cf_J_MouthBase_s': 'xssssss',
@@ -460,6 +462,12 @@ def drive2(arm, target_bone, target_prop, target_component,
     var2.targets[0].transform_space = 'LOCAL_SPACE'
     var.targets[0].rotation_mode = order
     d.driver.expression = formula
+
+def copy_scale_self(arm, c):
+    drive(arm, c, "scale", 1, c, "SCALE_X", "var")
+    drive(arm, c, "scale", 2, c, "SCALE_X", "var")
+    arm.pose.bones[c].lock_scale[1]=True
+    arm.pose.bones[c].lock_scale[2]=True
 
 
 def prettify_armature(arm, body):
@@ -819,6 +827,10 @@ def delete_drivers(arm):
         delete_driver(arm, 'cf_J_LegUp02_dam_'+s, 'location', 2)
 
 def set_drivers(arm, extend_safe):
+    # Non-uniform scales on these will lead to weird artifacts
+    copy_scale_self(arm, "cf_N_height")
+    copy_scale_self(arm, "cf_J_LegUp00_L")
+    copy_scale_self(arm, "cf_J_ArmUp00_L")
     for s,sgn in (('L','-'),('R','')):
         # when twisting ArmUp00 (twist = along its length), gradient the effect from shoulder to elbow
         drive(arm, 'cf_J_ArmUp01_dam_' + s, 'rotation_euler', 0, 'cf_J_ArmUp00_'+s, 'ROT_X', '-0.75*var', order='SWING_TWIST_X') # changed from game -0.66
