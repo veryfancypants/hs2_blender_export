@@ -84,6 +84,10 @@ This happens when one pair is drawn in the head texture and the other pair is ov
 
 This is the expected outcome if the script is unable to figure out how to excise the "original" body part. In particular, this is expected to happen if "HighPoly" uncensor is in use. Manually cut out the duplicate mesh and sew on the remaining copy.
 
+* Clothing items which are semi-transparent in-game appear opaque in Blender:
+
+Switch the material of the clothing item from 'Alpha Clip' to 'Alpha Blend'.
+
 ### TUNING
 
 To pose or reshape the character, go to "pose mode" on the armature, select layers, then select bones and rotate them with the mouse (click 'r' to go into rotation mode) or directly from the item transform window (top right corner of the 3D view panel).
@@ -107,6 +111,10 @@ To add uniform gloss (lip gloss, liquids, etc.) to the face, generate an appropr
 
 ![Clear coat](https://github.com/veryfancypants/veryfancypants.github.io/blob/master/clear_coat.jpg?raw=true)
 
+To transfer clothing between characters (requires "Refactor armature" on both):
+* Select the clothing item, right-click, "Clear parent"
+* Click on the clothing item, Ctrl+click on the target character, right-click, "Parent -> Armature Deform"
+* Right-click again, "Clear Parent Inverse"
 
 ### KNOWN ISSUES
 
