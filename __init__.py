@@ -11,17 +11,20 @@ import json
 import hashlib
 import uuid
 
-analyzer_enabled = True
-normalizer_enabled = True
+analyzer_enabled = False
+normalizer_enabled = False
 
+"""
 try:
     analyzer_py = os.path.dirname(__file__)+"/analyzer.py"
     print(analyzer_py)
     f=open(analyzer_py, "r")
     f.close()
     analyzer_enabled = True
+    print("analyzer_enabled")
 except:
     analyzer_enabled = False
+    print("analyzer_disabled")
 
 try:
     normalizer_py = os.path.dirname(__file__)+"/normalizer.py"
@@ -33,9 +36,9 @@ except:
 
 if analyzer_enabled:
     from . import analyzer
-
 if normalizer_enabled:
     from . import normalizer
+"""
 
 from .armature import (
     reshape_armature, 
@@ -67,7 +70,7 @@ from bpy.types import (
 bl_info = {
     "name": "HS2 character importer",
     "author": "",
-    "version": (1, 0, 240312),
+    "version": (1, 0, 240328),
     "blender": (4, 0, 2),
     "description": "HS2 character importer",
     "tracker_url": "",
@@ -93,13 +96,20 @@ def hs2object():
 stored_json_preset_map=""
 
 preset_map={}
+preset_favorites=set()
+
 waifus_path=""
 presets_dirty = False
 
 def get_preset_list(self, context):
     preset_list = []
     for k in preset_map:
-        preset_list.append((str(k), preset_map[k].name, preset_map[k]["uuid"], k))
+        name = preset_map[k].name
+        if preset_map[k]["uuid"] in preset_favorites:
+            # Blender UI seems unable to handle non-ASCII characters in drop-down menus, at least in Linux
+            # (although they are fine in texts/labels); so, we can't use any of the natural options like ⭐ ٭ ★ etc.
+            name = "* " + name + " *"
+        preset_list.append((str(k), name, preset_map[k]["uuid"], k))
     return preset_list
 
 def get_export_dir(self):
@@ -176,7 +186,7 @@ def convert_preset_from_dict(dict_preset):
 
 def load_presets():
     print("load_presets")
-    global preset_map, waifus_path, presets_dirty, stored_json_preset_map
+    global preset_map, waifus_path, presets_dirty, stored_json_preset_map, preset_favorites
     preset_map={}
     # Tricky! I can't write 'preset_list=[]', because there's a reference to the _original_ instance of preset_list
     # stored inside hs2rig_data.presets. And if I simply reassign it, the UI will keep on using the old list.
@@ -192,16 +202,14 @@ def load_presets():
         fp.close()
         waifus_path = cfg["waifus_path"]
         json_preset_map = cfg["presets"]
-        #stored_json_preset_map = json_preset_map
+        if "favorites" in cfg:
+            preset_favorites=set(cfg["favorites"])
         for x in json_preset_map:
             preset_map[int(x)]=json_preset_map[x]
             if isinstance(preset_map[int(x)], list):
                 preset_map[int(x)] = convert_preset(preset_map[int(x)])
             elif isinstance(preset_map[int(x)], dict):
                 preset_map[int(x)] = convert_preset_from_dict(preset_map[int(x)])
-            #elif isinstance(preset_map[int(x)], str):
-            #    v = json.loads(preset_map[int(x)])
-            #    preset_map[int(x)] = convert_preset_from_dict(v)
             else:
                 print("Unexpected preset type")
         loaded = True
@@ -274,22 +282,22 @@ def load_presets():
         try:
             print(dump_dir+'/Textures/')
             v=os.listdir(dump_dir+'/Textures/')
+            for f in v:
+                if f.endswith('.png'):
+                    ff=dump_dir+'/Textures/'+f
+                    #if n<3:
+                    #    print(ff, ff in textures)
+                    if ff in textures:
+                        continue
+                    try:
+                        md5=hashlib.md5(open(ff,'rb').read()).hexdigest()
+                    except:
+                        pass
+                    n+=1
+                    importer.hash_to_file_map[md5] = ff
+                    saved_hash_map.write(ff+" "+md5+"\n")
         except:
             pass
-        for f in v:
-            if f.endswith('.png'):
-                ff=dump_dir+'/Textures/'+f
-                #if n<3:
-                #    print(ff, ff in textures)
-                if ff in textures:
-                    continue
-                try:
-                    md5=hashlib.md5(open(ff,'rb').read()).hexdigest()
-                except:
-                    pass
-                n+=1
-                importer.hash_to_file_map[md5] = ff
-                saved_hash_map.write(ff+" "+md5+"\n")
     saved_hash_map.close()
     print(n, "newly indexed textures, ", len(importer.hash_to_file_map), "unique hashes")
 
@@ -320,6 +328,7 @@ def save_presets():
     cfg = {
     "waifus_path":waifus_path,
     "presets":{x:preset_map[x].as_dict() for x in preset_map},
+    "favorites": list(preset_favorites)
     }
     #print(preset_map)
     s = json.dumps(cfg, indent=4)
@@ -489,18 +498,20 @@ def get_attr(name):
 def set_attr(name, x, store=True):
     global presets_dirty
     if store:
-        current = int(bpy.context.scene.hs2rig_data.presets)
-        if current in preset_map:
-            if name=="Eye color":
-                if preset_map[current].set_eye_color(x):
-                    presets_dirty = True
-            elif name=="Hair color":
-                if preset_map[current].set_hair_color(x):
-                    presets_dirty = True
-            else:
-                if (not name in preset_map[current]) or (preset_map[current][name] != x):
-                    preset_map[current][name] = x
-                    presets_dirty = True
+        h = hs2object()
+        if h is not None:
+            p = find_preset(h)
+            if p is not None:
+                if name=="Eye color":
+                    if p.set_eye_color(x):
+                        presets_dirty = True
+                elif name=="Hair color":
+                    if p.set_hair_color(x):
+                        presets_dirty = True
+                else:
+                    if (not name in p) or (p[name] != x):
+                        p[name] = x
+                        presets_dirty = True
 
     attributes.set_attr(name, x)
 
@@ -551,6 +562,8 @@ class hs2rig_props(PropertyGroup):
         description="When checked, the armature will be recalculated so that all body shape adjustments become part of the pose. "
         " It is slower and it sometimes fails, but it makes imported clothing and hair interchangeable between characters"
         )
+    subdivide: BoolProperty(name="Subdivide", default=True,
+        description="Bake one level of subdivision into the mesh in the face and other critical areas. Improves quality of new shape keys. Ignored if the import is high-poly")
     extend_safe: BoolProperty(name="Extend (safe)", default=True,
         description="Apply various enhancements to the mesh and the rig")
     extend_full: BoolProperty(name="Extend (full)", default=False,
@@ -560,9 +573,8 @@ class hs2rig_props(PropertyGroup):
         items=injector_options,
         default="Auto", 
         description="Add a prefabricated injector and attempt to stitch it onto the mesh")
+    reweight_clothing: BoolProperty(name="Reweight clothing", default=True, description="Transfer weights from torso to clothing items covering it (to make them respond to new torso deform bones)")
     add_exhaust: BoolProperty(name="Add an exhaust", default=True, description="Add a prefabricated exhaust port and attempt to stitch it onto the mesh")
-    wipe: BoolProperty(name="Wipe scene before import", default=False,
-        description="When checked, all existing objects will be deleted from the scene before the new character is added")
 
     #
     #  Character posing and appearance adjustment
@@ -582,6 +594,7 @@ class hs2rig_props(PropertyGroup):
         set=set_finger_curl
     )
     mouth_open: FloatProperty(name="Mouth open", min=0, max=100, description="Mouth open", get=get_mouth_open, set=set_mouth_open)
+    fat: WrapProperty(FloatProperty, "Fat", soft_min=-3, soft_max=3, step=0.1, store=False)
     ik: WrapProperty(BoolProperty,'IK')
     hair_color: WrapProperty(FloatVectorProperty, "Hair color", subtype='COLOR', min=0.0, max=1.0)
     eye_color: WrapProperty(FloatVectorProperty, "Eye color", subtype='COLOR', min=0.0, max=1.0)
@@ -671,8 +684,14 @@ class hs2rig_OT_execute(Operator):
     def execute(self, context):
         arm = hs2object()
         if arm is not None:
-            if context.scene.hs2rig_data.command == 'eye_shape':
+            if context.scene.hs2rig_data.command == 'nails':
+                add_extras.tweak_nails(arm, arm["body"])
+            elif context.scene.hs2rig_data.command == 'eye_shape':
                 add_extras.eye_shape(arm, arm["body"], None)
+            elif context.scene.hs2rig_data.command == 'lip_shape':
+                add_extras.lip_arch_shapekey(arm, arm["body"], None)
+            elif context.scene.hs2rig_data.command == 'nose_shape':
+                add_extras.nasolabial_crease(arm, arm["body"], None)
             else:
                 getattr(normalizer, context.scene.hs2rig_data.command)(arm, arm["body"])
         return {'FINISHED'}
@@ -684,11 +703,9 @@ class hs2rig_OT_reset_cust(Operator):
     bl_options = {'REGISTER', 'UNDO'}
     def execute(self, context):
         h = hs2object()
-        for p in preset_map:
-            print(preset_map[p])
-            if preset_map[p]["uuid"]==h["preset_uuid"]:
-                importer.reset_customization(h)
-                #armature.set_drivers(h)
+        p = find_preset(h)
+        if p is not None:
+            importer.reset_customization(h)
         return {'FINISHED'}
 
 class hs2rig_OT_load_cust(Operator):
@@ -700,6 +717,7 @@ class hs2rig_OT_load_cust(Operator):
         h = hs2object()
         p = find_preset(h)
         if p is not None:
+            importer.reset_customization(h)
             importer.load_customization_from_string(h, p.get("customization") or "")
             #armature.set_drivers(h)
         return {'FINISHED'}
@@ -713,6 +731,8 @@ class hs2rig_OT_save_cust(Operator):
         h = hs2object()
         s = importer.customization_string(h, "cf_N_height")
         print("New customization string", s)
+        if "unused_customization" in h:
+            s += h["unused_customization"]
         p = find_preset(h)
         print("Preset", p)
         if p is not None:
@@ -792,11 +812,12 @@ class hs2rig_OT_load_preset_character(Operator):
             replace_teeth=context.scene.hs2rig_data.replace_teeth,
             add_injector=context.scene.hs2rig_data.add_injector,
             add_exhaust=context.scene.hs2rig_data.add_exhaust,
-            wipe=context.scene.hs2rig_data.wipe,
+            subdivide=context.scene.hs2rig_data.subdivide,
             c_eye=eye_color,
             c_hair=hair_color,
             name=name,
-            customization=preset.get("customization")
+            customization=preset.get("customization"),
+            reweight_clothing=context.scene.hs2rig_data.reweight_clothing
             )
         if uuid is not None:
             arm["preset_uuid"] = uuid
@@ -896,7 +917,7 @@ class hs2rig_OT_import(DirSelector):
             replace_teeth=context.scene.hs2rig_data.replace_teeth,
             add_injector=context.scene.hs2rig_data.add_injector,
             add_exhaust=context.scene.hs2rig_data.add_exhaust,
-            wipe=context.scene.hs2rig_data.wipe,
+            subdivide=context.scene.hs2rig_data.subdivide,
             c_eye=eye_color,
             c_hair=hair_color,
             name = name,
@@ -905,10 +926,7 @@ class hs2rig_OT_import(DirSelector):
         bpy.context.scene.hs2rig_data.standard_poses="T"
         return {'FINISHED'}
 
-class hs2rig_OT_import_all(Operator):
-    bl_idname = "object.import_all"
-    bl_label = "Load all presets"
-    bl_description = "Load all preset characters"
+class hs2rig_OT_import_subset(Operator):
     bl_options = {'REGISTER', 'UNDO'}
     
     def execute(self, context):
@@ -916,6 +934,8 @@ class hs2rig_OT_import_all(Operator):
         count = 0
         for value in preset_map:
             preset = preset_map[value]
+            if not self.import_check(preset["uuid"]):
+                continue
             eye_color = preset.eye_color
             hair_color = preset.hair_color
             arm = importer.import_body(preset.get_path(),
@@ -925,7 +945,7 @@ class hs2rig_OT_import_all(Operator):
                 replace_teeth=context.scene.hs2rig_data.replace_teeth,
                 add_injector=context.scene.hs2rig_data.add_injector,
                 add_exhaust=context.scene.hs2rig_data.add_exhaust,
-                wipe=context.scene.hs2rig_data.wipe,
+                subdivide=context.scene.hs2rig_data.subdivide,
                 c_eye=preset.eye_color,
                 c_hair=preset.hair_color,
                 name=preset.name,
@@ -942,6 +962,21 @@ class hs2rig_OT_import_all(Operator):
             bpy.context.scene.hs2rig_data.standard_poses="T"
         return {'FINISHED'}
 
+
+class hs2rig_OT_import_all(hs2rig_OT_import_subset):
+    bl_idname = "object.import_all"
+    bl_label = "Load all presets"
+    bl_description = "Load all preset characters"
+    def import_check(self, uuid):
+        return True
+
+class hs2rig_OT_import_favorites(hs2rig_OT_import_subset):
+    bl_idname = "object.import_favorites"
+    bl_label = "Load favorite presets"
+    bl_description = "Load favorite preset characters"
+    def import_check(self, uuid):
+        return uuid in preset_favorites
+
 class hs2rig_OT_reload_presets(Operator):
     bl_idname = "object.reload_presets"
     bl_label = "Reload presets"
@@ -950,6 +985,31 @@ class hs2rig_OT_reload_presets(Operator):
     
     def execute(self, context):
         load_presets()
+        return {'FINISHED'} 
+
+class hs2rig_OT_favorite_add(Operator):
+    bl_idname = "object.favorite_add"
+    bl_label = "Add to favorites"
+    bl_description = "Add to favorites"
+    bl_options = {'REGISTER', 'UNDO'}
+    def execute(self, context):
+        h = hs2object()
+        global preset_favorites
+        if h is not None and "preset_uuid" in h:
+            preset_favorites.add(h["preset_uuid"])
+        return {'FINISHED'} 
+
+class hs2rig_OT_favorite_remove(Operator):
+    bl_idname = "object.favorite_remove"
+    bl_label = "Remove from favorites"
+    bl_description = "Remove from favorites"
+    bl_options = {'REGISTER', 'UNDO'}
+    def execute(self, context):
+        h = hs2object()
+        global preset_favorites
+        if h is not None and "preset_uuid" in h:
+            if h["preset_uuid"] in preset_favorites:
+                preset_favorites.remove(h["preset_uuid"])
         return {'FINISHED'} 
 
 class hs2rig_OT_select_export_dir(Operator):
@@ -1018,8 +1078,10 @@ class HS2RIG_PT_ui(Panel):
         if arm is not None and arm.type == 'MESH':
             arm = arm.parent
 
+        active_object = None
         if arm is not None and arm.type == 'ARMATURE' and arm.get("default_rig")!=None:
             preset = find_preset(arm)
+            active_object = preset
             box = layout.box()
             box.prop(context.scene.hs2rig_data, "standard_poses")
             row = layout.row(align=True)
@@ -1027,6 +1089,7 @@ class HS2RIG_PT_ui(Panel):
             row = layout.row(align=True)
             row.prop(context.scene.hs2rig_data, "finger_curl_scale", slider=True)
             row.prop(context.scene.hs2rig_data, "mouth_open", slider=True)
+            row.prop(context.scene.hs2rig_data, "fat", slider=True)
             if not context.scene.hs2rig_data.neuter:
                 row.prop(context.scene.hs2rig_data, "exhaust")
             if arm.type == 'ARMATURE' and ('stick_01' in arm.pose.bones):
@@ -1057,6 +1120,12 @@ class HS2RIG_PT_ui(Panel):
 
             row = layout.row(align=True)
             row.operator("object.reset_customization")
+            if (active_object is not None) and "uuid" in active_object:
+                if active_object["uuid"] in preset_favorites:
+                    row.operator("object.favorite_remove")
+                else:
+                    row.operator("object.favorite_add")
+
             row = layout.row(align=True)
             op = row.operator("object.load_from_customization")
             op = row.operator("object.save_to_customization")
@@ -1107,29 +1176,40 @@ class HS2RIG_PT_ui(Panel):
         row2 = row.row(align=True)
         op = row2.operator("object.load_preset_character")
         row2.operator("object.import_all")
+        if len(preset_favorites)>1:
+            row2.operator("object.import_favorites")
         if len(preset_map)==0:
             row2.enabled=False
         row.operator("object.import")
+
 
         if analyzer_enabled:
             row = box.row(align=True)
             row.prop(context.scene.hs2rig_data, "run_analyzer")
 
         row = box.row(align=True)
-        row.prop(context.scene.hs2rig_data, "wipe")
+        row.prop(context.scene.hs2rig_data, "subdivide")
         row.prop(context.scene.hs2rig_data, "refactor")
         if context.scene.hs2rig_data.refactor:
             row = box.row(align=True)
-            row.prop(context.scene.hs2rig_data, "replace_teeth")
-            row = box.row(align=True)
             row.prop(context.scene.hs2rig_data, "extend_safe")
+            row.prop(context.scene.hs2rig_data, "replace_teeth")
             if context.scene.hs2rig_data.extend_safe:
+                row = box.row(align=True)
                 row.prop(context.scene.hs2rig_data, "extend_full")
+                row.prop(context.scene.hs2rig_data, "reweight_clothing")
             row = box.row(align=True)
             op=row.prop_menu_enum(context.scene.hs2rig_data, "add_injector")
             op=row.prop(context.scene.hs2rig_data, "add_exhaust")
         row = box.row(align=True)
         row.label(text=importer.last_import_status)
+        """
+        if active_object is not None:
+            name = active_object.name
+            if active_object["uuid"] in preset_favorites:
+                name = '↑ ' + name
+            row.label(text=name)
+        """
         if analyzer_enabled and context.scene.hs2rig_data.run_analyzer:
             analyzer.analyzer(hs2object())
             if len(analyzer.analyzer_report)>0:
@@ -1154,6 +1234,7 @@ hs2rig_OT_load_cust,
 hs2rig_OT_reset_cust,
 hs2rig_OT_import,
 hs2rig_OT_import_all,
+hs2rig_OT_import_favorites,
 hs2rig_OT_save_presets,
 hs2rig_OT_reload_presets,
 hs2rig_OT_add_new_preset,
@@ -1163,6 +1244,10 @@ hs2rig_OT_name_to_preset,
 hs2rig_OT_load_preset_character,
 hs2rig_props,
 hs2rig_OT_execute,
+
+hs2rig_OT_favorite_add,
+hs2rig_OT_favorite_remove,
+
 #hs2rig_OT_select_export_dir,
 ]
 
@@ -1178,11 +1263,13 @@ def register():
     config_path = os.path.dirname(__file__)+"/assets/hs2blender.cfg"
     load_presets()
 
+    print("Registering...")
+
     for x in addon_classes: 
         bpy.utils.register_class(x)
     last_preset = None
     bpy.types.Scene.hs2rig_data = PointerProperty(type=hs2rig_props)
-    print("Registering...")
+
     import importlib
     importlib.reload(add_extras)
     importlib.reload(attributes)
@@ -1193,3 +1280,4 @@ def register():
     if normalizer_enabled:
         importlib.reload(normalizer)
     importlib.reload(solve_for_deform)
+

@@ -305,7 +305,7 @@ def load_textures(arm, body, hair_color, eye_color, suffix):
 
     eyeshadow_mat=replace_mat(eyeshadow, bpy.data.materials['Eyeshadow'].copy(),  'Eyeshadow_' + suffix)
     set_tex(eyeshadow, 'Image Texture', 'eyekage', 'MainTex')    
-
+    body["eyeshadow_mat"]=eyeshadow_mat
     """
     while len(eyeshadow.data.materials):
         eyeshadow.data.materials.pop()
@@ -318,6 +318,7 @@ def load_textures(arm, body, hair_color, eye_color, suffix):
     hair_mats.append(eyelash_mat)
     #if hair_color!=None:
     eyelash_mat.node_tree.nodes['RGB'].outputs[0].default_value = hair_color
+    body["eyelash_mat"]=eyelash_mat
 
     if find_tex('eye', 'ShadeIrisTex') is not None:
         eye_mat = bpy.data.materials['Eyes2'].copy()
@@ -538,13 +539,7 @@ def stitch_head_to_torso(body):
         pass
 
     
-def import_bodyparts(fbx, wipe_scene):
-    if wipe_scene:
-        for bpy_data_iter in (bpy.data.objects, bpy.data.meshes):
-            for id_data in bpy_data_iter:
-                #if  id_data.name!="Cube" and id_data.name!="Material Cube" and not id_data.name.startswith('Prefab '):
-                bpy_data_iter.remove(id_data)
-
+def import_bodyparts(fbx):
     obj_list = bpy.data.objects.keys()
     arm_list = [x for x in obj_list if bpy.data.objects[x].type=='ARMATURE']
     bpy.ops.import_scene.fbx(filepath=fbx)
@@ -848,6 +843,7 @@ def reset_customization(arm):
 def load_customization_from_string(arm, s):
     print("load_customization_from_string", s)
     s = s.split('\n')
+    unused_entries=[]
     for x in s:
         if len(x)<3:
             continue
@@ -876,6 +872,9 @@ def load_customization_from_string(arm, s):
                     y=y[3:]
                     insns=insns[1:]
             arm["deformed_rig"][bone]=arm.pose.bones[bone].matrix_basis.copy()
+        else:
+            unused_entries.append(x)
+    arm["unused_customization"]='\n'.join(unused_entries)
 
 def load_customization(arm, custfn):
     try:
@@ -902,12 +901,8 @@ def fix_neck_loop(body):
                 v.add(x.verts[1].index)
 
     vg = body.vertex_groups['cf_J_Head_s'].index
-    #body.data.vertices.select_set('select',boundary)
     boundary = [(x in v) and (add_extras.get_weight(body, x, vg)>0.99) for x in range(len(body.data.vertices))]
-    #print(len(v), "boundary verts")
-    #print(sum(boundary), "/", len(body.data.vertices), "selected")
     if len(boundary)>0:
-        print("Attempting to delete the loop inside neck")
         bpy.ops.object.mode_set(mode='EDIT')
         bpy.ops.mesh.select_all(action='DESELECT')
         bpy.ops.object.mode_set(mode='OBJECT')
@@ -947,8 +942,11 @@ def import_body(input, refactor,
         do_extend_safe, do_extend_full, 
         add_injector,
         add_exhaust,
-        replace_teeth, wipe, c_eye, c_hair,
-        name, customization):
+        replace_teeth, subdivide, 
+        c_eye, c_hair,
+        name, customization,
+        reweight_clothing=False
+        ):
     #global path, fbx, suffix, dumpfilename, last_import_status, customization
     global path, last_import_status
     print('import_body', input)
@@ -1003,7 +1001,7 @@ def import_body(input, refactor,
         
     try:
         t1=time.time()
-        success, arm, body = import_bodyparts(fbx, wipe)
+        success, arm, body = import_bodyparts(fbx)
         t2=time.time()
         print("FBX imported in %.3f s" % (t2-t1))
         if not success:
@@ -1062,7 +1060,6 @@ def import_body(input, refactor,
         bpy.ops.object.mode_set(mode='POSE')
 
         male = (body['Boy'] > 0.0)
-
         if add_injector is None:
             add_injector = male
             for b in arm.pose.bones:
@@ -1100,11 +1097,14 @@ def import_body(input, refactor,
             add_extras.add_helper_jc_bones(arm)
             add_extras.add_spine_rear_soft(arm, body)
 
+        if subdivide:
+            add_extras.subdivide(arm, body)
 
         if not custom_head:
             if do_extend_safe:
                 # Add a number of new customization shape keys.
-                add_extras.add_shape_keys(arm, body, do_extend_full)
+                add_extras.add_shape_keys(arm, body, False)
+
                 # Reversible mods.
                 # This splits a number of VGs and adds a number of bones, but in such a manner that, with new bones in null pose,
                 # the result should be virtually identical to unmodified mesh
@@ -1112,50 +1112,63 @@ def import_body(input, refactor,
                 # but they should be minimal).
                 add_extras.add_skull_soft_neutral(arm, body)
 
-                # This is irreversible but harmless (fixing upper/lower lip identifications.)
-                add_extras.repaint_mouth_minimal(arm, body)
-
             # Irreversible mods (unique or fundamentally changed VGs)
             if do_extend_full and 'cf_J_FaceUp_tz' in body.vertex_groups:
-                # Repaint nose bridge to forehead transition
-                t1 = time.time()
-                add_extras.repaint_nose_bridge(arm, body)
-                t2 = time.time()
-                print("Repaint nose bridge: %.3f s" % (t2-t1))
-                t1=t2
-                # Repaint upper neck to lower skull transition
-                add_extras.repaint_upper_neck(arm, body)
-                t2 = time.time()
-                print("Repaint upper neck: %.3f s" % (t2-t1))
-                t1=t2
-                # Add new bones to control nose-cheek and nasolabial fold areas
-                add_extras.repaint_face(arm, body)
-                t2 = time.time()
-                print("Repaint face: %.3f s" % (t2-t1))
-                t1=t2
-                # Add bones and VGs for nostrils and nasal septum
-                add_extras.add_nostrils(arm, body)
+                add_extras.repaint_head(arm, body)
 
             # Scalp VG (for curves hair attachment)
             add_extras.paint_scalp(arm, body)
+
+        if do_extend_safe:
+            add_extras.tweak_nails(arm, body)
+
+        bpy.context.view_layer.objects.active = body
+        bpy.ops.paint.weight_paint_toggle()
+        bpy.ops.object.vertex_group_clean(group_select_mode='ALL', limit=0.005)
+        bpy.ops.paint.weight_paint_toggle()
 
         t2=time.time()
         print("Tweaks done in %.3f s" % (t2-t1))
         t1=t2
 
-        if wipe:
-            bpy.ops.object.mode_set(mode='OBJECT')
-            light_data = bpy.data.lights.new('light', type='POINT')
-            light = bpy.data.objects.new('light', light_data)
-            bpy.context.collection.objects.link(light)
-            light.location = (0.2, -2, 1.5)
-            light.data.energy=100.0
         bpy.context.view_layer.objects.active = arm
         bpy.ops.object.mode_set(mode='OBJECT')
+
+        if reweight_clothing:
+            arm.data.pose_position='REST'
+            bpy.context.view_layer.objects.active = body
+            for x in arm.children:
+                print(x, x.type)
+                if x.type!='MESH':
+                    continue
+                if 'hair' in x.name:
+                    continue
+                if len(x.data.materials)>0 and x.data.materials[0].name.startswith('Injector'):
+                    continue
+                if len(x.data.materials)>0 and 'hair' in x.data.materials[0].name:
+                    continue
+                if x.name.startswith('o_tang'):
+                    continue
+                if x.name.startswith('o_tooth'):
+                    continue
+                if x.name.startswith('o_body'):
+                    continue
+                vgs = ['cf_J_Kosi01_s', 'cf_J_Spine01_s', 'cf_J_Kosi02_s', 'cf_J_Spine03_s']
+                if len(x.vertex_groups)==0:
+                    continue
+                if not (any((y in x.vertex_groups for y in vgs))):
+                    continue
+                print("Attempting weight transfer on", x.name)
+                bpy.ops.object.select_all(action='DESELECT')
+                x.select_set(True)
+                bpy.ops.object.data_transfer(data_type='VGROUP_WEIGHTS', use_auto_transform=False, use_object_transform=True, layers_select_src='ALL', layers_select_dst='NAME', mix_mode='REPLACE')
+            arm.data.pose_position='POSE'
 
         arm["body"] = body
         arm["tooth"] = tooth
         #arm["path"] = root_path
+
+        arm["fat"] = 0.0
 
         body["pore_depth"] = 1.0
         body["pore_intensity"] = 1.0

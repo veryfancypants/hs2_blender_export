@@ -18,6 +18,18 @@ from .attributes import set_attr
 def clamp01(x):
     return max(0.0, min(1.0, x))
 
+def find_nearest_vertices(body, subset1, subset2):
+    cos = np.zeros([len(body.data.vertices)*3], dtype=np.float32)
+    body.data.vertices.foreach_get("co", cos)
+    cos = cos.reshape([-1,3])
+    ys = cos[subset1].reshape([1,-1,3])
+    xs = cos[subset2].reshape([-1,1,3])
+    xy = xs-ys
+    xy *= xy
+    xy = np.sqrt(xy[:,:,0]+xy[:,:,1]+xy[:,:,2])
+    return np.argmin(xy, axis=1)
+
+
 def make_child_bone(arm, parent, name, offset, collection, rotation_mode='XYZ', 
         parent_head=True, tail_offset=None, copy='',
         inherit_scale=True):
@@ -82,8 +94,12 @@ def add_weight(body, vertex, group, weight):
     if isinstance(group, tuple) or isinstance(group, list):
         wts = [get_weight(body, vertex, g) for g in group]
         wtot = sum(wts)
-        for g,w0 in zip(group, wts):
-            add_weight(body, vertex, g, weight*w0/wtot)
+        if wtot==0.0:
+            for g,w0 in zip(group, wts):
+                add_weight(body, vertex, g, weight/len(group))
+        else:
+            for g,w0 in zip(group, wts):
+                add_weight(body, vertex, g, weight*w0/wtot)
         return
 
     if isinstance(group, str):
@@ -96,10 +112,10 @@ def add_weight(body, vertex, group, weight):
 
 def vgroup(obj, name, min_wt=None):
     if min_wt is None:
-        min_wt = -1.0
+        min_wt = 0.0
     if isinstance(name, list):
         ids = [obj.vertex_groups[vg].index for vg in name if vg in obj.vertex_groups]
-        return [x for x in range(len(obj.data.vertices)) if any([(g.group==id and g.weight>=min_wt) for g in obj.data.vertices[x].groups for id in ids])]
+        return [x for x in range(len(obj.data.vertices)) if any([(g.group==id and g.weight>min_wt) for g in obj.data.vertices[x].groups for id in ids])]
 
     if not name in obj.vertex_groups:
         return []
@@ -108,7 +124,7 @@ def vgroup(obj, name, min_wt=None):
     if min_wt is None:
         return [x for x in range(len(obj.data.vertices)) if id in [g.group for g in obj.data.vertices[x].groups]]
     else:
-        return [x for x in range(len(obj.data.vertices)) if any([(g.group==id and g.weight>=min_wt) for g in obj.data.vertices[x].groups])]
+        return [x for x in range(len(obj.data.vertices)) if any([(g.group==id and g.weight>min_wt) for g in obj.data.vertices[x].groups])]
 
 
 # Calls 'func' for each vertex in 'vg' (which is an index, a string, or a list of vertex groups), to calculate 'wt' (a value in 0 to 1 range).
@@ -186,11 +202,16 @@ def create_functional_shape_key(body, name, vg, func, on=True, max=1.0, bm=None)
     else:
         bm_owned = False
     lay = bm.loops.layers.uv['uv1']
-    v = vgroup(body, vg)
-    for x in v:
-        uv = bm.verts[x].link_loops[0][lay].uv
-        sk.data[x].co += func(uv=uv, vert=x, co=body.data.vertices[x].undeformed_co, norm=body.data.vertices[x].normal)
-    body.data.shape_keys.key_blocks[name].value=1. if on else 0.
+
+    if isinstance(vg, list) and isinstance(vg[0], int):
+        v = vg
+    else:
+        v = vgroup(body, vg)
+
+    for i, x in enumerate(v):        
+        uv = bm.verts[x].link_loops[0][lay].uv if len(bm.verts[x].link_loops)>0 else (0,0)
+        sk.data[x].co += func(uv=uv, vert=x, co=body.data.vertices[x].undeformed_co, norm=body.data.vertices[x].normal, set_id=i)
+    body.data.shape_keys.key_blocks[name].value=0.
     body.data.shape_keys.key_blocks[name].slider_max=max
     if bm_owned:
         bm.free()
@@ -244,11 +265,62 @@ def interpolate(y1, y2, x1, x2, x):#1, 2*strength, 1, 1.15, hpos_ext)
         return y1 + (y2-y1) * (x-x1) / (x2-x1)
 
 
-def curve_interp(curve, x, xsymm = None, cubic=False, debug=False):
+def d2(x,y):
+    return (x[0]-y[0])*(x[0]-y[0])+(x[1]-y[1])*(x[1]-y[1])
+
+def curve_find_nearest(curve, v, debug=False):
+    index = 0
+    for j in range(1, len(curve)):
+        if d2(curve[j],v)<d2(curve[index],v):
+            index=j
+    p1 = Vector(curve[index])
+    p2 = Vector(curve[index])
+    frac1 = index
+    frac2 = index
+    t1 = (curve[index][0]-curve[index-1][0], curve[index][1]-curve[index-1][1]) if index>0 else (curve[index+1][0]-curve[index][0], curve[index+1][1]-curve[index][1])
+    t2 = t1
+    if debug:
+        print("curve_find_nearest", v, index, curve[index])
+    if index>0:
+        p1_, frac1_ = mathutils.geometry.intersect_point_line(Vector(v), Vector(curve[index][:2]), Vector(curve[index-1][:2]))
+        if debug:
+            print(Vector(v), Vector(curve[index][:2]), Vector(curve[index-1]), "=>", p1_, frac1_)
+        if frac1_>=0 and frac1_<1.0:
+            p1 = p1_
+            frac1 = index-frac1_
+            t1 = (curve[index][0]-curve[index-1][0], curve[index][1]-curve[index-1][1])
+    if index+1<len(curve):
+        p2_, frac2_ = mathutils.geometry.intersect_point_line(Vector(v), Vector(curve[index][:2]), Vector(curve[index+1][:2]))
+        if debug:
+            print(Vector(v), Vector(curve[index][:2]), Vector(curve[index+1][:2]), "=>", p2_, frac2_)
+        if frac2_>=0 and frac2_<1.0:
+            p2 = p2_
+            frac2 = index+frac2_
+            t2 = (curve[index+1][0]-curve[index][0], curve[index+1][1]-curve[index][1])
+    if debug:
+        print("Distances", d2(p1,v), d2(p2,v))
+    if d2(p1,v)<d2(p2,v):
+        p,t,frac = p1,t1,frac1
+    else:
+        p,t,frac = p2,t2,frac2
+    side = (p[0]-v[0])*t[1] - (p[1]-v[1])*t[0]
+    dist = math.sqrt((p[0]-v[0])*(p[0]-v[0])+(p[1]-v[1])*(p[1]-v[1]))
+    return p,t,frac,side,dist
+
+def curve_interp(curve, x, xsymm = False, cubic=False, debug=False):
     if debug:
         print(curve, x)
-    if xsymm is not None and x>xsymm:
-        x = xsymm - (x-xsymm)
+    if xsymm and x>0.500:
+        x = 0.500 - (x-0.500)
+
+    if isinstance(curve[0], float):
+        if x<=0:
+            return curve[0]
+        if x>=len(curve)-1:
+            return curve[-1]
+        k = int(math.floor(x))
+        return curve[k] + (curve[k+1]-curve[k]) * (x-k)
+
     if x<=curve[0][0]:
         return curve[0][1]
     if x>=curve[-1][0]:
@@ -318,13 +390,20 @@ def eye_shape(arm, body, bm, on=True):
     id02r = body.vertex_groups['cf_J_Eye02_s_R'].index
     id04r = body.vertex_groups['cf_J_Eye04_s_R'].index
 
-    def formula(vert, co, norm, uv, **kwargs):#for x in set(list(v)):
+    eye_soft = vgroup(body, ['cf_J_Eye01_s_R','cf_J_Eye02_s_R','cf_J_Eye03_s_R','cf_J_Eye04_s_R',
+        'cf_J_Eye01_s_L','cf_J_Eye02_s_L','cf_J_Eye03_s_L','cf_J_Eye04_s_L'])
+
+    nearest_eye_verts = find_nearest_vertices(body, eyeball, eye_soft)
+    print(len(nearest_eye_verts), len(eye_soft))
+
+    def formula(vert, co, norm, uv, set_id, **kwargs):#for x in set(list(v)):
         x=vert
         sign = -1 if co[0]>0 else 1
 
         if co[0]>0:
             co=Vector((co[0]*-1., co[1], co[2]))
-        y = min(eyeball, key=lambda z: (co-body.data.vertices[z].co).length)
+        #y = min(eyeball, key=lambda z: (co-body.data.vertices[z].co).length)
+        y = eyeball[nearest_eye_verts[set_id]]
         r = co-body.data.vertices[y].co
         n = body.data.vertices[y].normal
         dot = n.dot(r)
@@ -343,6 +422,7 @@ def eye_shape(arm, body, bm, on=True):
             effect *= interpolate(0.0075, 0, 0.0, r_range, dot)
             effect[0] *= sign
 
+        """
         # pull back the inner corner of the lower eyelid, forming a crease at 45 degree angle
         if uv[0]>0.500:
             uv=(1-uv[0],uv[1])
@@ -351,10 +431,10 @@ def eye_shape(arm, body, bm, on=True):
             w_x = bump(uv[0], 0.383, 0.408, 0.441, shape='cos')
             w_y = max(0, 1.-abs(uv[1]-lower_lid_fold)/(0.518-lower_lid_fold))
             effect[2] += -0.01*w_x*w_y
+        """
         return effect
 
-    create_functional_shape_key(body, 'Eye shape', ['cf_J_Eye01_s_R','cf_J_Eye02_s_R','cf_J_Eye03_s_R','cf_J_Eye04_s_R',
-        'cf_J_Eye01_s_L','cf_J_Eye02_s_L','cf_J_Eye03_s_L','cf_J_Eye04_s_L'], formula, on = on, bm = bm)
+    create_functional_shape_key(body, 'Eye shape', eye_soft, formula, on = on, bm = bm)
 
 def tweak_nose(arm, body, bm, on):
     bpy.ops.object.mode_set(mode='OBJECT')
@@ -362,66 +442,33 @@ def tweak_nose(arm, body, bm, on):
     #bpy.ops.object.mode_set(mode='EDIT')
     if not 'cf_J_Nose_tip' in body.vertex_groups:
         return
-    idx_nose_base = body.vertex_groups['cf_J_NoseBase_s'].index
-    idx_nose = body.vertex_groups['cf_J_Nose_t'].index
-    idx_tip = body.vertex_groups['cf_J_Nose_tip'].index
-    idx_l = body.vertex_groups['cf_J_NoseWing_tx_L'].index
-    idx_r = body.vertex_groups['cf_J_NoseWing_tx_R'].index
-    if 'cf_J_CheekMid_L' in body.vertex_groups:
-        idx_cheek_l = body.vertex_groups['cf_J_CheekMid_L'].index
-        idx_cheek_r = body.vertex_groups['cf_J_CheekMid_R'].index
-    else:
-        idx_cheek_l = body.vertex_groups['cf_J_CheekUp_L'].index
-        idx_cheek_r = body.vertex_groups['cf_J_CheekUp_R'].index
 
-    tip=vgroup(body, 'cf_J_Nose_tip')
-    nose=vgroup(body, 'cf_J_Nose_t')
+    curve = [
+        (0.500, 0.402, 0.0, 1.0, -1),
+        (0.465, 0.401, 0.2, 1.0, -1),
+        (0.453, 0.411, 0.6, 0.6, -1),
+        (0.450, 0.420, 1.0, 0.0, -1),
+        (0.455, 0.435, 1.0, -0.5, -1),
+        (0.457, 0.441, 0.7, -0.8, -1),
+        (0.463, 0.448, 0.5, -1.0, -1),
+        (0.472, 0.451, 0.5, -1.0, -1),
+        (0.480, 0.445, 0.5, -1.0, -1),
+    ]
 
-    sk = body.shape_key_add(name='Nostril pinch')
-    sk.interpolation='KEY_LINEAR'
-    for x in range(len(body.data.vertices)):
-        sk.data[x].co = body.data.shape_keys.key_blocks["Basis"].data[x].co
+    normals_x = [x[2] for x in curve]
+    normals_y = [x[3] for x in curve]
 
-    #create_functional_shape_key(body, 'Nostril pinch', ['cf_J_Nose_tip','cf_J_Nose_t'], formula)
+    def formula(co, vert, uv, norm, **kwargs):
+        sign = 1 if uv[0]<0.5 else -1
+        if uv[0]>0.500:
+            uv=(1-uv[0],uv[1])
+        pos, t, coord, side, dist = curve_find_nearest(curve, uv, debug=(vert==21185 or vert==32309))
+        n = Vector([curve_interp(normals_x, coord)*sign, curve_interp(normals_y, coord), -1])
+        n.normalize()
+        effect = n * sigmoid(dist, 0, 0.01) * 0.008
+        return effect
 
-    for x in tip:
-        wc = get_weight(body, x, idx_tip)
-        wl = get_weight(body, x, idx_l)
-        wr = get_weight(body, x, idx_r)
-        delta = min(wc, max(wl,wr))
-        dp = body.data.vertices[x].normal[1] + body.data.vertices[x].normal[2]
-        if dp>0:
-            sk.data[x].co[0] -= 0.05*delta*dp*(-1 if wr>wl else 1)
-            sk.data[x].co[2] -= 0.05*delta*dp
-
-    deltas={}
-    for x in nose:
-        if body.data.vertices[x].co[1]>16.3:
-            continue
-        wn = get_weight(body, x, idx_nose)+get_weight(body, x, idx_nose_base)
-        wch = get_weight(body, x, idx_cheek_l)+get_weight(body, x, idx_cheek_r)
-
-        wc = get_weight(body, x, idx_tip)
-        wl = get_weight(body, x, idx_l)
-        wr = get_weight(body, x, idx_r)
-        no = body.data.vertices[x].normal
-        norm = -no[1]+no[2]
-        if wl<wn and wr < wn and wc < wn and wn>0.1 and no[1]<0 and norm>0.8:
-            effect = (1.0-max(wl,wr)/wn) * (1.-wc/wn) * sigmoid(norm, 1.1, 0.8) #min(1.0, (norm-1.0)/0.2)
-            no2 = Vector([no[0], -1.0, 0.5])
-            no2.normalize()
-            deltas[x] = 0.02*effect*no2
-
-        if wch>0.050 and wn>0.200 and no[2]>0.3:
-            if wr>0.600 and no[0]<-0.3:
-                deltas[x] = Vector([-0.01, 0, 0])*sigmoid(no[2], 0.6, 0.3)*sigmoid(no[0], -0.6, -0.3)
-            if wl>0.600 and no[0]>0.3:
-                deltas[x] = Vector([0.01, 0, 0])*sigmoid(no[2], 0.6, 0.3)*sigmoid(no[0], 0.6, 0.3)
-
-    for x in deltas:
-        sk.data[x].co -= deltas[x]
-
-    body.data.shape_keys.key_blocks["Nostril pinch"].value=1. if on else 0.
+    create_functional_shape_key(body, 'Nostril pinch', ['cf_J_Nose_tip','cf_J_Nose_t','cf_J_NoseBase_s'], formula, max=2.0)
 
 def add_mouth_blendshape(body, bm):
     if not 'cf_J_CheekLow_L' in body.vertex_groups: # custom head
@@ -567,14 +614,14 @@ def adams_apple_delete(arm, body, bm):
 def upper_lip_shapekey(arm, body, bm, on=True):
     def formula(uv, norm, **kwargs):
         curve=[
-        (0.450,0.352),
+        (0.442,0.352),
         (0.485,0.371),
         ]
-        wx = sigmoid(uv[0],0.465,0.450) * sigmoid(uv[0], 0.535, 0.550)
-        effect1 = bump(uv[1], curve_interp(curve, uv[0],xsymm=True), None, 0.399, shape='cos') * Vector([0, -0.01, -0.01])
+        wx = sigmoid(uv[0],0.470,0.440) * sigmoid(uv[0], 0.530, 0.560)
+        effect1 = wx * bump(uv[1], curve_interp(curve, uv[0], xsymm=True), None, 0.399, shape='cos') * Vector([0, -0.01, -0.01])
         return effect1
     boy = (body['Boy']>0.0)
-    create_functional_shape_key(body, 'Upper lip trough', 'cf_J_Mouthup', formula, on = on and (not boy), bm = bm)
+    create_functional_shape_key(body, 'Upper lip trough', ['cf_J_Mouthup','cf_J_MouthBase_s_s'], formula, on = on and (not boy), bm = bm)
 
 # Smoothly arches the lips
 def lip_arch_shapekey(arm, body, bm, on=True):
@@ -730,14 +777,16 @@ def temple_depress(arm, body, bm, on=True):
             sign = -1.0
         else:
             sign = 1.0
-        r=Vector(uv)-Vector([0.265,0.567])
+        # Push vertices on the temple inward, creating a depression
+        r=Vector(uv)-Vector([0.253,0.585])
         r[1]*=0.5
 
+        # Pull the outer edge of the eye socket outward
         r2 = Vector(uv)-Vector([0.316, 0.540])
         if r2[1]<0.0:
             r2[1]=min(0.0, r2[1]+0.05)
         r2[1]*=0.5
-        return (sigmoid(r.length, 0, 0.05)-sigmoid(r2.length,0,0.025)*0.5) * Vector([0.025*sign, 0, 0])
+        return (sigmoid(r.length, 0, 0.08)-sigmoid(r2.length,0,0.025)*0.5) * Vector([0.025*sign, 0, 0])
 
     create_functional_shape_key(body, 'Temple depress', ['cf_J_FaceUp_tz','cf_J_CheekUp_L','cf_J_CheekUp_R'], formula, on=on, bm = bm)
 
@@ -759,16 +808,152 @@ def jaw_soften(arm, body, bm, on=True):
         pos = uv[1] - curve_interp(curve, uv[0], xsymm=True)
         if uv[0]>0.5:
             uv=(1-uv[0],uv[1])
-        effect = bump(pos, -2*width, 0, width, shape='cos') * (1. + bump(uv[0], 0.43, 0.46, 0.49, shape='cos'))
-
+        effect = bump(pos, -2*width, 0, width, shape='cos') * (1. + bump(uv[0], 0.43, 0.46, 0.49, shape='cos')) * sigmoid(uv[0], 0.225, 0.150)
         return norm * -0.01 * effect
-
     width = 0.035
-    create_functional_shape_key(body, 'Jaw soften', ['cf_J_ChinLow'], formula, on=False, bm=bm)
+    create_functional_shape_key(body, 'Jaw soften', ['cf_J_Chin_rs', 'cf_J_ChinLow','cf_J_ChinFront_s'], formula, on=False, bm=bm)
     width = 0.060
-    create_functional_shape_key(body, 'Jaw soften more', ['cf_J_ChinLow'], formula, on=on, bm=bm)
+    create_functional_shape_key(body, 'Jaw soften more', ['cf_J_Chin_rs', 'cf_J_ChinLow','cf_J_ChinFront_s'], formula, on=on, bm=bm)
+
+# Explicitly subdivide the mesh before trying to build new shape keys.
+# Necessary to produce good quality shape keys in sensitive areas (e.g. around the nose).
+def subdivide(arm, body):
+    if len(body.data.vertices)>60000:
+        return
+    t1 = time.time()
+    # None of the 'direct' subdivision methods (bpy.ops.mesh.subdivide and bmesh.ops.subdivide_edges) do a good job subdividing
+    # a mesh with weight groups.
+    # It's not possible to simply apply the subdivision surface modifier to a mesh with shape keys.
+    # It is possible to make copies of original mesh and apply subdivision modifiers on each,
+    # but it's very slow.
+    # This is a simple way to get around all the restrictions and get the job done fairly quickly.
+    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.context.view_layer.objects.active = body
+
+    for key in body.data.shape_keys.key_blocks:
+        key.value=0.0
+
+    dups={}
+    n=0
+
+    for mod in body.modifiers:
+        if mod.type=='ARMATURE':
+            mod.show_viewport = False
+
+    subsurf = None
+    for mod in body.modifiers:
+        if mod.type=='SUBSURF':
+            subsurf = mod
+            break
+
+    if subsurf is None:
+        subsurf = body.modifiers.new("subsurf", "SUBSURF")
+    subsurf.levels = 1
+    subsurf.render_levels = 1
+    # Subdiv time (Orange2):
+    # Simple: 14.8 s
+    #   No "Optimal" (show_only_control_edges=False): 14.8 s
+    #   use_limit_surface=False: 9.1 s
+    #   uv_smooth='NONE': 12.0 s
+    #   use_apply_on_spline = True: 14.7 s
+    #   use_limit_surface=False and uv_smooth='NONE': 9.8 s
+    # Catmull-Clark + limit_surface: 56 s
+    # Catmull-Clark + no limit_surface: 9 s
+    subsurf.subdivision_type = 'CATMULL_CLARK'
+    subsurf.use_limit_surface = False
+    subsurf.show_viewport = True
+
+    bpy.ops.object.modifier_move_to_index(modifier="subsurf", index=0)
+    bpy.ops.object.duplicate()
+    body_copy = bpy.context.view_layer.objects.active 
+    bpy.context.view_layer.objects.active = body
+    bpy.ops.object.shape_key_remove(all=True, apply_mix=True)
+    bpy.ops.object.modifier_apply(modifier="subsurf")
+    sk = body.shape_key_add(name="Basis")
+    for key in body_copy.data.shape_keys.key_blocks:
+        if key.name=='Basis':
+            continue
+        bpy.context.view_layer.objects.active = body_copy
+        s=0
+        for k in body_copy.data.shape_keys.key_blocks:
+            k.value = 1.0 if k.name==key.name else 0.0
+            s+=k.value
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        dup = body_copy.evaluated_get(depsgraph)
+        #bpy.qwerty()
+        sk = body.shape_key_add(name=key.name)
+        dup.data.vertices.update()
+        sk.interpolation='KEY_LINEAR'
+        coords = np.zeros([len(body.data.vertices)*3], dtype=np.float32)
+        dup.data.vertices.foreach_get("co", coords)
+        sk.data.foreach_set("co", coords)
+
+    bpy.data.objects.remove(body_copy)
+    bpy.context.view_layer.objects.active = body
+
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_mode(type='VERT')
+    bpy.ops.mesh.select_all(action='DESELECT')
+    for i, slot in enumerate(body.material_slots):
+        if slot.material in [body["eyelash_mat"], body["eye_mat"], body["eyeshadow_mat"]]:
+            body.active_material_index = i
+            bpy.ops.object.material_slot_select()
+    eye_mask = [False]*len(body.data.vertices)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    body.data.vertices.foreach_get("select", eye_mask)
+
+    #spine01 = vgroup(body, 'cf_J_Spine01_s')
+    #for x in spine01:
+    #    if (body.data.vertices[x].co-Vector([0, 11.54, 0.67])).length < 0.30:
+    #        eye_mask[x] = True
+
+    bm = bmesh.new()
+    bm.from_mesh(body.data)
+    bm.verts.ensure_lookup_table()
+    bm.edges.ensure_lookup_table()
+    bm.faces.ensure_lookup_table()
+
+    def should_dissolve(x):
+        # Don't subdivide eyes and eyelashes
+        if eye_mask[x]:
+            return True
+        co = bm.verts[x].co
+        # Preserve detail in the face
+        if co[1]>=15.45 and co[2]>0.0:
+            return False
+        # Keep subdivision of the navel
+        if (co-Vector([0, 11.54, 0.67])).length < 0.30:
+            return False
+        # Keep hands
+        if abs(co[0])>6.0:
+            return False
+        # Keep toes
+        if co[1]<0.5 and co[2]>0.6:
+            return False
+        # Dissolve everything else
+        return True
+
+
+    rank_3_verts = [bm.verts[x] for x in range(len(bm.verts)) if should_dissolve(x) and len(bm.verts[x].link_edges)==3]
+    # dissolve rank 3 verts
+    bmesh.ops.dissolve_verts(bm, verts=rank_3_verts)
+    bm.verts.ensure_lookup_table()
+    bm.edges.ensure_lookup_table()
+    rank_2_verts = [x for x in bm.verts if len(x.link_edges)==2]
+    # dissolve rank 2 verts
+    bmesh.ops.dissolve_verts(bm, verts=rank_2_verts)
+    bm.to_mesh(body.data)
+    bm.free()
+
+    for mod in body.modifiers:
+        if mod.type=='ARMATURE':
+            mod.show_viewport = True
+
+    t2 = time.time()
+    print("Subdivision done in %.3f s" % (t2-t1))
 
 def add_shape_keys(arm, body, on):
+    #bpy.qwerty()
     t1=time.time()
     t0=t1
     bm = bmesh.new()
@@ -817,6 +1002,7 @@ def add_shape_keys(arm, body, on):
     t2=time.time()
     print("jaw_soften: %.3f s" % (t2-t1))
     t1=t2
+    nasolabial_crease(arm, body, bm)
     bm.free()
     t2=time.time()
     print("%.3f s to add shape keys" % (t2-t0))
@@ -854,8 +1040,6 @@ def repaint_mouth_cavity(x):
     # Retag as 'mouth cavity' any verts in 'cf_J_MouthBase_s' with normals pointing toward char's back
     # (this corrects several verts inside mouth corners)
     for y in v2:
-        #if y==7456:
-        #    print("Normal", x.data.vertices[y].normal)
         if y in vnose:
             continue
         min_dot=1.0
@@ -892,31 +1076,8 @@ def repaint_mouth_cavity(x):
         if old_chw==0.0 and chw>0.0:
             x.vertex_groups['cf_J_Chin_rs'].add([y], chw, 'ADD')
 
-def add_skull_soft_neutral(arm, body):
-    #print("add_skull_soft_neutral")
-    vs = body.data.vertices
-    split_vgroup(body, "cf_J_ChinFront_s", 'cf_J_Chin_rs', lambda co, **kwargs: sigmoid(co[2], 0.40, 0.15))
-    split_vgroup(body, "cf_J_FaceUpFront_ty", 'cf_J_FaceUp_ty', lambda co, **kwargs: max(0,min(0.5,(co[2]+0.25)*2.)))
-    split_vgroup(body, 'cf_J_FaceRoot_r_s', "cf_J_FaceRoot_s", lambda co, **kwargs: 1.-max(0,min(1,(co[2]+0.25)*2.)))
-
-    id_l = body.vertex_groups['cf_J_CheekUp_L'].index
-    id_r = body.vertex_groups['cf_J_CheekUp_R'].index
-    # Correct these two VGs by making sure they are only present on their respective sides
-    v_l=vgroup(body, 'cf_J_CheekUp_L')
-    for x in v_l:
-        if body.data.vertices[x].co[0]<0 :
-            print("Removing", x, body.data.vertices[x].co, "from CheekUp_L", get_weight(body, x, id_l))
-            set_weight(body, x, id_l, 0.0)
-    v_r=vgroup(body, 'cf_J_CheekUp_R')
-    for x in v_r:
-        if body.data.vertices[x].co[0]>0:
-            set_weight(body, x, id_r, 0.0)
-
-    bm = bmesh.new()
-    bm.from_mesh(body.data)
-    bm.verts.ensure_lookup_table()
-    bm.faces.ensure_lookup_table()
-
+def patch_cheekup_transitions(arm, body, bm):
+    print("patch_cheekup_transitions")
     lay = bm.loops.layers.uv['uv1']
 
     v_l=vgroup(body, ['cf_J_CheekUp_L','cf_J_CheekUp_R'])
@@ -954,7 +1115,23 @@ def add_skull_soft_neutral(arm, body):
     (0.484, 0.460),
     ]
 
+    bpy.context.view_layer.objects.active = body
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_mode(type='VERT')
+    bpy.ops.mesh.select_all(action='DESELECT')
+    for i, slot in enumerate(body.material_slots):
+        if slot.material in [body["eyelash_mat"], body["eye_mat"], body["eyeshadow_mat"]]:
+            body.active_material_index = i
+            bpy.ops.object.material_slot_select()
+    eyelash_mask = [False]*len(body.data.vertices)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    body.data.vertices.foreach_get("select", eyelash_mask)
+
     def cheek_excess_fraction(uv, co, vert, **kwargs):
+        if vert==13717:
+            print("cheek_excess_fraction", vert, eyelash_mask[vert])
+        if eyelash_mask[vert]:
+            return 0
         eye_dist = curve_interp(lower_eyelid_curve, uv[0], xsymm=True)-uv[1]
         eye_dist = clamp01(eye_dist / 0.060)
         w_cheek = get_weight(body, vert, id_upl if uv[0]>0.500 else id_upr)
@@ -972,39 +1149,14 @@ def add_skull_soft_neutral(arm, body):
 
     split_vgroup(body, 'cf_J_CheekUp2_L', 'cf_J_CheekUp_L', cheek_excess_fraction, bm=bm)
     split_vgroup(body, 'cf_J_CheekUp2_R', 'cf_J_CheekUp_R', cheek_excess_fraction, bm=bm)
-
-    v_r=vgroup(body, 'cf_J_CheekUp_R', min_wt=0.01)
-    
-    hl = [vs[y].co[1]+0.5*abs(vs[y].co[0]) for y in v_r]
-    hl.sort()
-    minpos = hl[0]
-    midpos = hl[len(hl)//2]
-    maxpos = hl[-1]
-    def mid_fraction(co, vert, **kwargs):
-        h = co[1]+0.5*abs(co[0])
-        return clamp01(1.5-2.*(h-minpos)/(maxpos-minpos))
-    split_vgroup(body, 'cf_J_CheekMid_L', 'cf_J_CheekUp_L', mid_fraction, bm=bm)
-    split_vgroup(body, 'cf_J_CheekMid_R', 'cf_J_CheekUp_R', mid_fraction, bm=bm)
-
-    make_child_bone(arm, 'cf_J_Chin_rs', 'cf_J_ChinFront_s', Vector([0,0,0.02]), "Chin")
-    make_child_bone(arm, 'cf_J_FaceUp_ty', 'cf_J_FaceUpFront_ty', Vector([0,0,0.02]), "Head internal")
-    make_child_bone(arm, 'cf_J_FaceRoot_s', 'cf_J_FaceRoot_r_s', Vector([0,0,-0.02]), "Head internal")
-
-    make_child_bone(arm, 'cf_J_FaceLow_s', 'cf_J_FaceLow_s_s', Vector([0, 0, 0.01]), "Head internal")
-    make_child_bone(arm, 'cf_J_MouthBase_s_s', 'cf_J_MouthBase_s', Vector([0, 0, 0.01]), "Mouth")
-    make_child_bone(arm, 'cf_J_Nose_t', 'cf_J_Nose_t_s', Vector([0,0,0.02]), "Nose")
-
-    make_child_bone(arm, 'cf_J_CheekUp_L', 'cf_J_CheekMid_L', Vector([-0.1, 0, 0]), "Cheeks")
-    make_child_bone(arm, 'cf_J_CheekUp_R', 'cf_J_CheekMid_R', Vector([0.1, 0, 0]), "Constrained - soft", copy='lrs')
     make_child_bone(arm, 'cf_J_FaceLow_s', 'cf_J_CheekUp2_L', Vector([0.32, 0.40, 0.19]), "Cheeks")
     make_child_bone(arm, 'cf_J_FaceLow_s', 'cf_J_CheekUp2_R', Vector([-0.32, 0.40, 0.19]), "Constrained - soft", copy='lrs')
 
-    body.vertex_groups['cf_J_FaceLow_s'].name = 'cf_J_FaceLow_s_s'
-    body.vertex_groups['cf_J_MouthBase_s'].name = 'cf_J_MouthBase_s_s'
-    body.vertex_groups['cf_J_Nose_t'].name = 'cf_J_Nose_t_s'
-
+def patch_cheekup_transitions_part2(arm, body, bm):
+    lay = bm.loops.layers.uv['uv1']
     # Touch up weights of CheekLow at the cheek / nose boundary
     v_l=vgroup(body, ['cf_J_CheekUp_L','cf_J_CheekUp_R'])
+    id = body.vertex_groups['cf_J_FaceLow_s'].index
     for x in v_l:
         uv = bm.verts[x].link_loops[0][lay].uv
         if uv[0]>0.500:
@@ -1019,11 +1171,13 @@ def add_skull_soft_neutral(arm, body):
             new_weight = max(0.0, 0.125 - 3*(tx-0.622) - 34*ty*ty)
             if new_weight > old_weight:
                 delta = new_weight - old_weight
-                wfl = get_weight(body, x, 'cf_J_FaceLow_s_s')
+                wfl = get_weight(body, x, id)
                 delta = min(delta, wfl)
                 set_weight(body, x, g, old_weight + delta)
-                set_weight(body, x, 'cf_J_FaceLow_s_s', wfl + delta)
-    
+                set_weight(body, x, id, wfl + delta)
+
+def patch_cheeklow_transitions(arm, body, bm):
+    lay = bm.loops.layers.uv['uv1']
     # Touch up weights of CheekLow at the cheek / chin boundary
     v_l=vgroup(body, ['cf_J_CheekLow_L','cf_J_CheekLow_R'])
     for x in v_l:
@@ -1039,7 +1193,61 @@ def add_skull_soft_neutral(arm, body):
             new_weight = max(0., 0.095+t*3)
             set_weight(body, x, g, min(old_weight, new_weight))
 
+def create_cheekmid(arm, body, bm):
+    vs = body.data.vertices
+    v_r=vgroup(body, 'cf_J_CheekUp_R', min_wt=0.01)
+    hl = [vs[y].co[1]+0.5*abs(vs[y].co[0]) for y in v_r]
+    hl.sort()
+    minpos = hl[0]
+    midpos = hl[len(hl)//2]
+    maxpos = hl[-1]
+    def mid_fraction(co, vert, **kwargs):
+        h = co[1]+0.5*abs(co[0])
+        return clamp01(1.5-2.*(h-minpos)/(maxpos-minpos))
+
+    split_vgroup(body, 'cf_J_CheekMid_L', 'cf_J_CheekUp_L', mid_fraction, bm=bm)
+    split_vgroup(body, 'cf_J_CheekMid_R', 'cf_J_CheekUp_R', mid_fraction, bm=bm)
+    make_child_bone(arm, 'cf_J_CheekUp_L', 'cf_J_CheekMid_L', Vector([-0.1, 0, 0]), "Cheeks")
+    make_child_bone(arm, 'cf_J_CheekUp_R', 'cf_J_CheekMid_R', Vector([0.1, 0, 0]), "Constrained - soft", copy='lrs')
+
+def add_skull_soft_neutral(arm, body):
+    vs = body.data.vertices
+    split_vgroup(body, "cf_J_ChinFront_s", 'cf_J_Chin_rs', lambda co, **kwargs: sigmoid(co[2], 0.40, 0.15))
+    split_vgroup(body, "cf_J_FaceUpFront_ty", 'cf_J_FaceUp_ty', lambda co, **kwargs: max(0,min(0.5,(co[2]+0.25)*2.)))
+    split_vgroup(body, 'cf_J_FaceRoot_r_s', "cf_J_FaceRoot_s", lambda co, **kwargs: 1.-max(0,min(1,(co[2]+0.25)*2.)))
+    make_child_bone(arm, 'cf_J_Chin_rs', 'cf_J_ChinFront_s', Vector([0,0,0.02]), "Chin")
+    make_child_bone(arm, 'cf_J_FaceUp_ty', 'cf_J_FaceUpFront_ty', Vector([0,0,0.02]), "Head internal")
+    make_child_bone(arm, 'cf_J_FaceRoot_s', 'cf_J_FaceRoot_r_s', Vector([0,0,-0.02]), "Head internal")
+
+    clean_cheeks(arm, body)
+
+    id_l = body.vertex_groups['cf_J_CheekUp_L'].index
+    id_r = body.vertex_groups['cf_J_CheekUp_R'].index
+
+    bm = bmesh.new()
+    bm.from_mesh(body.data)
+    bm.verts.ensure_lookup_table()
+    bm.faces.ensure_lookup_table()
+
+    patch_cheekup_transitions(arm, body, bm)
+    patch_cheekup_transitions_part2(arm, body, bm)
+    patch_cheeklow_transitions(arm, body, bm)
+
+    create_cheekmid(arm, body, bm)
+
+    # This is irreversible but harmless (fixing upper/lower lip identifications.)
+    repaint_mouth_minimal(arm, body, bm)
+
+    make_child_bone(arm, 'cf_J_FaceLow_s', 'cf_J_FaceLow_s_s', Vector([0, 0, 0.01]), "Head internal")
+    make_child_bone(arm, 'cf_J_MouthBase_s', 'cf_J_MouthBase_s_s', Vector([0, 0, 0.01]), "Mouth")
+    make_child_bone(arm, 'cf_J_Nose_t', 'cf_J_Nose_t_s', Vector([0,0,0.02]), "Nose")
+
+    body.vertex_groups['cf_J_FaceLow_s'].name = 'cf_J_FaceLow_s_s'
+    body.vertex_groups['cf_J_MouthBase_s'].name = 'cf_J_MouthBase_s_s'
+    body.vertex_groups['cf_J_Nose_t'].name = 'cf_J_Nose_t_s'
+
     bm.free()
+
 
 # Above pupil level, partially transfer nose weight to faceup 
 # (because, as painted, NoseBridge's effect extends well into the forehead)
@@ -1051,31 +1259,76 @@ def repaint_nose_bridge(arm, body):
 
     for v in range(len(body.data.vertices)):
         co = body.data.vertices[v].co
-        t = co[1]-co[2]
-        if t>=15.75 and co[1]-0.5*abs(co[0])>=16.45:
-            wold = get_weight(body, v, id_nose_t) + get_weight(body, v, id_bridge)
+        #t = co[1]-co[2]
+        #if t>=15.75 and co[1]-0.5*abs(co[0])>=16.45:
+        if co[1]>16.30:
+            wold = get_weight(body, v, id_bridge)
+            wbase = get_weight(body, v, id_base)
+            wt = get_weight(body, v, id_nose_t)
+            base_transition = sigmoid(co[1], 16.60, 16.30)
+            wold += wbase*base_transition
+            wold += wt*base_transition
+            set_weight(body, v, id_base, wbase*(1-base_transition))
+            set_weight(body, v, id_nose_t, wt*(1-base_transition))
             wb = min(wold, sigmoid(co[1], 16.45, 16.70))
-            wold += get_weight(body, v, id_base)
-            set_weight(body, v, id_base, 0.0)
-            set_weight(body, v, id_nose_t, 0)
             set_weight(body, v, id_bridge, wb)
             add_weight(body, v, id_faceup, wold-wb)
 
-def add_spine_rear_soft(arm, body):
-    bpy.ops.object.mode_set(mode='OBJECT')  
-    bpy.context.view_layer.objects.active = arm
+def repaint_torso(body):
     for n in ['1','2','3']:
         split_vgroup(body, 'cf_J_Spine0'+n+'_r_s', 'cf_J_Spine0'+n+'_s', lambda co,**kwargs: 1.-max(0,min(1,(co[2]+0.5)*2.)))
-        # 15.63 -0.74 -> 15.27 0.08  0.36 
     split_vgroup(body, 'cf_J_NeckUp_s', 'cf_J_Neck_s', lambda co,**kwargs:  max(0,min(1,(co[1]+co[2]*0.44-15.30)/0.6+0.5)))
     split_vgroup(body, 'cf_J_NeckFront_s', 'cf_J_Neck_s', lambda co,**kwargs:  max(0,min(1,(co[2]+0.25)*2.)))
+
+def add_spine_rear_soft(arm, body):
+    bpy.ops.object.mode_set(mode='OBJECT')
+    repaint_torso(body)
+
+    bpy.context.view_layer.objects.active = arm
     bpy.ops.object.mode_set(mode='EDIT')
     for n in ['1','2','3']:
         make_child_bone(arm, 'cf_J_Spine0'+n+'_s', 'cf_J_Spine0'+n+'_r_s', Vector([0, 0, -0.02]), "Spine - soft")
     make_child_bone(arm, 'cf_J_Neck_s', 'cf_J_NeckFront_s', Vector([0,0,0.02]), "Spine - soft")
     make_child_bone(arm, 'cf_J_Neck_s', 'cf_J_NeckUp_s', Vector([0,0.1,0.02]), "Spine - soft")
 
-def repaint_mouth_minimal(arm, body):
+    rib_curve=[
+        (0.000, 0.735),
+        (0.037, 0.720),
+        (0.060, 0.726),
+        (0.069, 0.734),
+        (0.088, 0.752),
+        (0.107, 0.784),
+        (0.125, 0.795),
+        (0.143, 0.784),
+        (0.162, 0.752),
+        (0.181, 0.734),
+        (0.190, 0.726),
+        (0.213, 0.720),
+        (0.250, 0.735),
+    ]
+    iliac_curve=[
+        (0.000, 0.690),
+        (0.028, 0.683),
+        (0.043, 0.665), 
+        (0.064, 0.641),
+        (0.085, 0.606),
+        (0.125, 0.585),
+        (0.165, 0.605),
+        (0.186, 0.641),
+        (0.207, 0.665),
+        (0.222, 0.683),
+        (0.250, 0.690),
+    ]
+    def front_belly_lower_weight(co, uv, vert, **kwargs):
+        return sigmoid(uv[1]-curve_interp(iliac_curve, uv[0]), 0.02, -0.02) * max(0,min(1,(co[2]+0.5)*2.))
+    def front_belly_upper_weight(co, uv, vert, **kwargs):
+        return sigmoid(uv[1]-curve_interp(rib_curve, uv[0]), -0.02, 0.02) * max(0,min(1,(co[2]+0.5)*2.))
+    split_vgroup(body, 'cf_J_Kosi01_f_s', 'cf_J_Kosi01_s', front_belly_lower_weight)
+    split_vgroup(body, 'cf_J_Spine01_f_s', 'cf_J_Spine01_s', front_belly_upper_weight)
+    make_child_bone(arm, 'cf_J_Kosi01_s', 'cf_J_Kosi01_f_s', Vector([0,-0.1,0.04]), "Spine - soft")
+    make_child_bone(arm, 'cf_J_Spine01_s', 'cf_J_Spine01_f_s', Vector([0,0.1,0.04]), "Spine - soft")
+
+def repaint_mouth_minimal(arm, body, bm):
     print("Repainting mouth...")
     if not 'cf_J_MouthCavity' in body.vertex_groups:
         return
@@ -1099,12 +1352,7 @@ def repaint_mouth_minimal(arm, body):
     mcands = set(vgroup(body, ['cf_J_MouthLow','cf_J_Mouthup']))
     coord = {}
 
-    bm = bmesh.new()
-    bm.from_mesh(body.data)
-    bm.verts.ensure_lookup_table()
-    bm.faces.ensure_lookup_table()
     lay = bm.loops.layers.uv['uv1']
-
     for n in mcands:
         uv = bm.verts[n].link_loops[0][lay].uv
         upper = (uv[1]>0.335) or (uv[1]>0.330 and body.data.vertices[n].normal[1]<0)
@@ -1113,7 +1361,6 @@ def repaint_mouth_minimal(arm, body):
             set_weight(body, n, "cf_J_MouthLow", 0 if upper else wud)
             set_weight(body, n, "cf_J_Mouthup", wud if upper else 0)
 
-    bm.free()
 
 def dissolve_facelow_s(arm, body, bm):
     print("dissolve_facelow_s")
@@ -1179,46 +1426,15 @@ def dissolve_facelow_s(arm, body, bm):
     t2=time.time()
     print("%3f s to dissolve facelow" % (t2-t1))
 
-def repaint_face(arm, body):
-    bpy.ops.object.mode_set(mode='OBJECT')
-    bpy.context.view_layer.objects.active = arm
-    id_l = body.vertex_groups['cf_J_CheekUp_L'].index
-    id_r = body.vertex_groups['cf_J_CheekUp_R'].index
-
-    # Correct these two WGs by making sure they are only present on their respective sides
-    v_l=vgroup(body, 'cf_J_CheekUp_L')
-    for x in v_l:
-        if body.data.vertices[x].co[0]<0:
-            set_weight(body, x, id_l, 0.0)
-    v_r=vgroup(body, 'cf_J_CheekUp_R')
-    for x in v_r:
-        if body.data.vertices[x].co[0]>0:
-            set_weight(body, x, id_r, 0.0)
-    
-    bm = bmesh.new()
-    bm.from_mesh(body.data)
-    bm.verts.ensure_lookup_table()
-    bm.edges.ensure_lookup_table()
-    bm.faces.ensure_lookup_table()
-
-    # Completely dissolve a pesky and inconvenient VG
-    #dissolve_facelow_s(arm, body, bm)
-    
-    """
-    for v, old_id, new_id, xw, c in ((v_l, old_id_l, new_id_l, -1.0, 'L'), (v_r, old_id_r, new_id_r, 1.0, 'R')):
-        def mid_fraction(co, **kwargs):
-            h = xw*0.5*co[1]+co[0]
-            return (h-minpos)/(maxpos-minpos)
-
-        split_vgroup(body, 'cf_J_CheekMid_'+c, 'cf_J_CheekUp_'+c, mid_fraction, bm=bm)
-    """
+def create_nasolabial(arm, body, bm):
+    print("nasolabial")
     curve=[
-    (0.332, 0.424),
+    (0.332, 0.420),
     (0.394, 0.433),
     (0.450, 0.446),
     ]
     # VG with support along the lines from lip corners to nose corners
-    def weight_nasolabial(uv, **kwargs):
+    def weight_nasolabial(vert, uv, **kwargs):
         y_weight = bump(uv[1], 0.332, 0.391, 0.450, shape='cos')
         fold = curve_interp(curve, uv[1])
         if uv[0]>=0.5:
@@ -1228,13 +1444,17 @@ def repaint_face(arm, body):
         else:
             x_weight = max(0.0, 1.-abs(uv[0]-fold)/0.060)
         return x_weight * x_weight * y_weight * 0.5
-    #print("Creating cf_J_Nasolabial_s")
     create_functional_vgroup(body, "cf_J_Nasolabial_s", ["cf_J_NoseBase_s", "cf_J_MouthBase_s_s"], weight_nasolabial, bm=bm)
+    make_child_bone(arm, 'cf_J_FaceBase', 'cf_J_Nasolabial_s', Vector([0,-0.15,0.8]), "Nose", tail_offset=Vector([0, 0.1, 0]))
+
+def create_nose_cheek(arm, body, bm):
     #print("Creating cf_J_NoseCheek_s")
     def weight_nose_cheek(co, vert, **kwargs):
         return sigmoid(1-6.0*abs(co[0]), 0, 1) * sigmoid(co[1], 16.2, 16.0) * sigmoid(co[1], 16.4, 16.6)
     split_vgroup(body, 'cf_J_NoseCheek_s', ['cf_J_NoseBase_s','cf_J_NoseBridge_s'], weight_nose_cheek, bm = bm)
+    make_child_bone(arm, 'cf_J_NoseBase_s', 'cf_J_NoseCheek_s', Vector([0, 0.2, 0.01]), "Nose")
 
+def restrict_nosebase(arm, body, bm):
     # Remove verts outside nasolabial folds from cf_J_NoseBase_s
     id_base = body.vertex_groups['cf_J_NoseBase_s'].index
     v=vgroup(body, 'cf_J_NoseBase_s', min_wt=0.001)
@@ -1251,15 +1471,69 @@ def repaint_face(arm, body):
                     g.weight *= (1.-wmax) / (1.-old_weight)
 
 
-    def weight_chin_cheek(uv, co, vert, **kwargs):
+def clean_cheeks(arm, body):
+    id_l = body.vertex_groups['cf_J_CheekUp_L'].index
+    id_r = body.vertex_groups['cf_J_CheekUp_R'].index
+
+    # Correct these two WGs by making sure they are only present on their respective sides
+    v_l=vgroup(body, 'cf_J_CheekUp_L')
+    for x in v_l:
+        if body.data.vertices[x].co[0]<0:
+            set_weight(body, x, id_l, 0.0)
+    v_r=vgroup(body, 'cf_J_CheekUp_R')
+    for x in v_r:
+        if body.data.vertices[x].co[0]>0:
+            set_weight(body, x, id_r, 0.0)
+
+def jaw_edge(arm, body, bm):
+    curve=[
+    (0.154, 0.333),
+    (0.212, 0.260),
+    (0.255, 0.220),
+    #(0.227, 0.228),
+    (0.283, 0.212),
+    (0.311, 0.220),
+    (0.339, 0.240),
+    ]
+    curve2=[
+    (0.500, 0.110),
+    (0.333, 0.154),
+    (0.260, 0.212),
+    (0.232, 0.239),
+    (0.212, 0.283),
+    (0.212, 0.311),
+    (0.212, 0.339),
+    ]
+
+    id_chin = body.vertex_groups['cf_J_Chin_rs'].index
+    id_chinlow = body.vertex_groups['cf_J_ChinLow'].index
+    id_root = body.vertex_groups['cf_J_FaceRoot_s'].index
+    id_root_r = body.vertex_groups['cf_J_FaceRoot_r_s'].index
+    v=vgroup(body, ['cf_J_Chin_rs','cf_J_ChinLow'], min_wt=0.001)
+    vs=body.data.vertices
+    lay = bm.loops.layers.uv['uv1']
+    for y in v:
+        uv = bm.verts[y].link_loops[0][lay].uv
         if uv[0]>0.500:
             uv=(1-uv[0],uv[1])
-        uv=(uv[0]-0.415,uv[1]-0.300)
-        return sigmoid(math.sqrt(uv[0]*uv[0]+0.5*uv[1]*uv[1]-0.25*uv[0]*uv[1]), 0.0, 0.04)
-    #create_functional_vgroup(body, 'cf_J_ChinCheek_s', 'cf_J_ChinFront_s', weight_chin_cheek, bm = bm)
-    split_vgroup(body, 'cf_J_ChinCheek_s', 'cf_J_ChinFront_s', weight_chin_cheek, bm = bm)
+        fold = curve_interp(curve, uv[1])
+        pos, t, coord, side, dist = curve_find_nearest(curve2, uv)
+        if side>0:
+            decay_rate = 12.0 * (0.33 + 0.67*sigmoid(coord, 3, 1))
+            max_chin = max(0.0, 1 - 0.3*sigmoid(coord, 5, 3) - dist*decay_rate)
+            old_chin = get_weight(body, y, id_chin)
+            old_low = get_weight(body, y, id_chinlow)
+            old_root = get_weight(body, y, id_root)
+            old_root_r = get_weight(body, y, id_root_r)
+            delta = old_chin+old_low-max_chin
+            if delta>0:
+                add_weight(body, y, id_chin, -delta*old_chin/(old_chin+old_low))
+                add_weight(body, y, id_chinlow, -delta*old_low/(old_chin+old_low))
+                frac = 1.-max(0,min(1,(vs[y].co[2]+0.25)*2))
+                add_weight(body, y, id_root, delta*(1-frac))
+                add_weight(body, y, id_root_r, delta*frac)
 
-
+def reassign_cheekup2(arm, body, bm):
     id_2l = body.vertex_groups['cf_J_CheekUp2_L'].index
     id_2r = body.vertex_groups['cf_J_CheekUp2_R'].index
     v_l=vgroup(body, ['cf_J_CheekUp2_L','cf_J_CheekUp2_R'])
@@ -1278,10 +1552,71 @@ def repaint_face(arm, body):
             set_weight(body, x, id_2r, 0)
 
 
-    make_child_bone(arm, 'cf_J_FaceBase', 'cf_J_Nasolabial_s', Vector([0,-0.15,0.8]), "Nose", tail_offset=Vector([0, 0.1, 0]))
-    make_child_bone(arm, 'cf_J_NoseBase_s', 'cf_J_NoseCheek_s', Vector([0, 0.2, 0.01]), "Nose")
+def create_chin_cheek(arm, body, bm):
+    def weight_chin_cheek(uv, co, vert, **kwargs):
+        if uv[0]>0.500:
+            uv=(1-uv[0],uv[1])
+        uv=(uv[0]-0.415,uv[1]-0.300)
+        return sigmoid(math.sqrt(uv[0]*uv[0]+0.5*uv[1]*uv[1]-0.25*uv[0]*uv[1]), 0.0, 0.04)
+    #create_functional_vgroup(body, 'cf_J_ChinCheek_s', 'cf_J_ChinFront_s', weight_chin_cheek, bm = bm)
+    split_vgroup(body, 'cf_J_ChinCheek_s', 'cf_J_ChinFront_s', weight_chin_cheek, bm = bm)
     make_child_bone(arm, 'cf_J_ChinFront_s', 'cf_J_ChinCheek_s', Vector([0,0,0.02]), "Chin")
 
+
+# does not work very well without subdivision, because we lack the level of detail in the area
+def nasolabial_crease(arm, body, bm):
+    curve=[
+    (0.420, 0.332),
+    (0.421, 0.362),
+    (0.433, 0.394),
+    (0.448, 0.438),
+    (0.458, 0.448),
+    (0.468, 0.453),
+    (0.475, 0.449),
+    ]
+
+    weight_curve=[
+    (0, 0),
+    (1, 0.5),
+    (2, 1.0),
+    (3, 0.4),
+    (4, 0.3),
+    (5, 0.2),
+    (6, 0.2),
+    ]
+    def weight_nasolabial_crease(uv, co, vert, **kwargs):
+        if uv[0]>0.500:
+            uv=(1-uv[0],uv[1])
+        pos, t, coord, side, dist = curve_find_nearest(curve, uv, debug=(vert==12693 or vert==93711 or vert==56446))
+        #side = (pos[0]-uv[0])*t[1] - (pos[1]-uv[1])*t[0]
+        def func(coord, pos, uv, dist):
+            #distance = math.sqrt((pos[0]-uv[0])*(pos[0]-uv[0])+(pos[1]-uv[1])*(pos[1]-uv[1]))
+            y_weight = curve_interp(weight_curve, coord) #bump(coord, 0, (len(curve)-1)/2., len(curve)-1, shape='cos')
+            if y_weight<0.002:
+                return 0.0
+            x = dist * (20.0 if side<0.0 else 10.0) / y_weight
+            if side>0.0 and uv[0]>pos[0]:
+                x *= 2.
+            if side<0.0:
+                x *= 0.5 + 0.5*sigmoid(coord, 4, 2)
+            if vert==12693 or vert==93711:
+                print("Vert", vert, "coord", coord, "pos", pos, "uv", uv, "dist", dist, "side", side, "x", x)
+            x = max(0.0, 1. - x)
+            return y_weight * (-0.5 + x*x) * sigmoid(1.-x)
+        effect = func(coord, pos, uv, dist)
+        """
+        for i, k in enumerate(curve):
+            dist2 = math.sqrt((k[0]-uv[0])*(k[0]-uv[0])+(k[1]-uv[1])*(k[1]-uv[1]))
+            effect2 = func(i, k, uv, dist2)
+            if dist2<1.6*dist and effect2<effect:
+                effect=effect2
+        """
+        return Vector([0, 0, -0.05*effect])
+
+    create_functional_shape_key(body, 'Nasolabial crease', ['cf_J_FaceLow_s_s','cf_J_MouthBase_s_s', 'cf_J_NoseBase_s',
+        'cf_J_NoseWing_tx_L', 'cf_J_NoseWing_tx_R','cf_J_Mouth_L','cf_J_Mouth_R'], weight_nasolabial_crease, 
+        on = True, bm = None)
+    body.data.shape_keys.key_blocks['Nasolabial crease'].value=1.
 
 def clone_object(x):
     x_data_copy = x.data.copy()
@@ -1659,7 +1994,7 @@ def attach_exhaust(arm, body):
     set_bump(mat, 'BumpMap2', 'skin_body', '2')
     set_tex(mat, 'Texture2', 'skin_body', 'Texture2', csp='Non-Color')    
     if set_tex(mat, 'Subsurface', 'skin_body', 'SubsurfaceAlbedo', csp='Non-Color') is None:
-        print("Setting Subsurface failed")
+        print("Torso subsurface texture not found")
         disconnect_link(mat, 'Subsurface')
     else:
         mat.node_tree.nodes['Group.004'].inputs['Subsurface/MainTex mix'].default_value=0.2
@@ -1893,14 +2228,8 @@ def mesh_hair_to_curves(body, hair):
     # Set 'Curves'->'Additional Subdivision' to at least 2 in renderer settings
     # Create hair material and connect hair color to interface
 
-def paint_nostrils_v1(arm, body):
-    bm = bmesh.new()
-    bm.from_mesh(body.data)
-    bm.verts.ensure_lookup_table()
-    bm.faces.ensure_lookup_table()
-    count=0
-    lay = bm.loops.layers.uv['uv1']
 
+def paint_nostrils(arm, body, bm):
     id_l=body.vertex_groups['cf_J_Nostril_L'].index
     id_r=body.vertex_groups['cf_J_Nostril_R'].index
     id_c=body.vertex_groups['cf_J_Nose_Septum'].index
@@ -1917,136 +2246,7 @@ def paint_nostrils_v1(arm, body):
         'cf_J_Nostril_L','cf_J_Nostril_R',
         'cf_J_Nose_Septum', 'cf_J_NoseBase_s'])
 
-    boy = (body['Boy']>0.0)
-    uv_skew = 0.0 if boy else 0.7
-    for x in v:
-        uv = bm.verts[x].link_loops[0][lay].uv
-        septum_bump = bump(uv[0], 0.490, 0.500, 0.510)
-        # 'cf_J_Nostril_*' support: ovals around (0.4826,0.4195) 
-        # (geometry is slightly different between M and F)
-
-        r = (uv-Vector([1-0.4826,0.4195]))
-        r = math.sqrt(r[0]*r[0] + r[1]*r[1] + uv_skew*r[0]*r[1])
-        wtl = sigmoid(r, 0.006, 0.018) * (1-septum_bump)
-
-        r2 = uv-Vector([0.4826,0.4195])
-        r2 = math.sqrt(r2[0]*r2[0] + r2[1]*r2[1] - uv_skew*r2[0]*r2[1])
-        wtr = sigmoid(r2, 0.006, 0.018) * (1-septum_bump)
-
-        # 'cf_J_Nose_Septum' support: oval around (0.500,0.406) .. (0.500,0.418) 
-        r3 = uv-Vector([0.5000,0.418])
-        if r3[1]<0.0:
-            r3[1] = min(0.0, r3[1]+0.012)
-        else:
-            r3[1] *= 2.0
-        wtc = sigmoid(r3.length, 0.000, 0.036)
-
-        # 'cf_J_Nose_tip' support: oval around (0.500,0.440), squished on the nostril side
-        r4 = uv-Vector([0.5000,0.436])
-        if r4[1]<0.0:
-            r4[1]*=2.0
-        else:
-            r4[1] /= 2.0
-        r4 = math.sqrt(r4[0]*r4[0]+r4[1]*r4[1])
-        wttip = 0.5*sigmoid(r4, 0.036)
-
-        wwl = get_weight(body, x, "cf_J_NoseWing_tx_L")
-        wwr = get_weight(body, x, "cf_J_NoseWing_tx_R")
-        w_nose_base = get_weight(body, x, "cf_J_NoseBase_s")
-        w_nose_t = get_weight(body, x, id_tt)
-        w_nose_tip = get_weight(body, x, id_t)
-        #w_nose_bridge2 = get_weight(body, x, id_b)
-
-        if x==12306:
-            print("wtl", wtl, "wtr", wtr, "wtc", wtc, "wtt", wttip)
-            for g in body.data.vertices[x].groups:
-                print(body.vertex_groups[g.group].name, g.weight)
-
-        s = wwl+wwr+wtl+wtr+wtc+wttip
-        if s>0.001:
-            budget = w_nose_t+w_nose_tip+wwr+wwl+w_nose_base #+w_nose_bridge2
-            base_blend = sigmoid(uv[1], 0.385, 0.410)*sigmoid(uv[1], 0.450, 0.475)
-            t_blend = 0.5*sigmoid(uv[1], 0.440, 0.420)+0.5*sigmoid(uv[1], 0.475, 0.450)
-            blend = base_blend+t_blend
-            wwl,wwr,wtl,wtr,wtc,wttip = [y*budget*(1-blend)/s for y in (wwl,wwr,wtl,wtr,wtc,wttip)]
-
-            set_weight(body, x, id_l, wtl)
-            set_weight(body, x, id_r, wtr)
-            set_weight(body, x, id_c, wtc)
-            set_weight(body, x, id_t, wttip)
-            set_weight(body, x, id_wl, wwl)
-            set_weight(body, x, id_wr, wwr)
-            set_weight(body, x, id_base, budget*base_blend)
-            set_weight(body, x, id_tt, budget*t_blend)
-            #set_weight(body, x, "cf_J_Nose_t", 0)
-        else:
-            #delta = w_nose_t*tt_suppress
-            if uv[1]<0.420:
-                set_weight(body, x, id_base, w_nose_base+w_nose_t)
-                set_weight(body, x, id_tt, 0)
-            if uv[1]>0.475:
-                set_weight(body, x, id_base, 0)
-                set_weight(body, x, id_tt, w_nose_base+w_nose_t)
-        """
-                #wtt=0.0
-                #wtbase=0.0
-            else:
-                wtt=1.0-(wtl+wtr+wtc+wttip)
-                tt_suppress = sigmoid(uv[1], 0.400, 0.420)
-                wtbase = wtt*tt_suppress
-                wtt *= 1.-tt_suppress
-
-            w_nose_t = get_weight(body, x, id_tt)
-            w_nose_base = get_weight(body, x, "cf_J_NoseBase_s")
-            w_nose_tip = get_weight(body, x, id_t)
-            w_nose_wing_l = get_weight(body, x, "cf_J_NoseWing_tx_L")
-            w_nose_wing_r = get_weight(body, x, "cf_J_NoseWing_tx_R")
-
-            budget = w_nose_t+w_nose_base+w_nose_tip+w_nose_wing_l+w_nose_wing_r
-            #if tt_suppress>0.0:
-            #    budget += w_nose_t*tt_suppress
-            #    w_nose_t *= (1.-tt_suppress)
-            #effect = wtl+wtr+wtc+wtt
-
-            #assert (wtl+wtr+wtc+wtt)*
-            #check_sum = (wtl+wtr+wtc+wtt)*budget + (w_nose_wing_l+w_nose_wing_r+w_nose_base+w_nose_t)*(1-effect)
-            #check_sum = effect*budget + (w_nose_wing_l+w_nose_wing_r+w_nose_base+w_nose_t)*(1-effect)
-
-            set_weight(body, x, id_l, wtl*budget)
-            set_weight(body, x, id_r, wtr*budget)
-            set_weight(body, x, id_c, wtc*budget)
-            set_weight(body, x, id_t, wttip*budget)
-            set_weight(body, x, "cf_J_NoseWing_tx_L", w_nose_wing_l*(1-effect))
-            set_weight(body, x, "cf_J_NoseWing_tx_R", w_nose_wing_r*(1-effect))
-            set_weight(body, x, "cf_J_NoseBase_s", w_nose_base*(1-effect))
-            set_weight(body, x, "cf_J_Nose_t", w_nose_t*(1-effect))
-        """
-        #if uv[1]<0.400:
-        #    set_weight(body, x, id_tt, 0.0)
-
-def paint_nostrils(arm, body):
-    bm = bmesh.new()
-    bm.from_mesh(body.data)
-    bm.verts.ensure_lookup_table()
-    bm.faces.ensure_lookup_table()
-    count=0
     lay = bm.loops.layers.uv['uv1']
-
-    id_l=body.vertex_groups['cf_J_Nostril_L'].index
-    id_r=body.vertex_groups['cf_J_Nostril_R'].index
-    id_c=body.vertex_groups['cf_J_Nose_Septum'].index
-    id_t=body.vertex_groups['cf_J_Nose_tip'].index
-    #id_b=body.vertex_groups['cf_J_NoseBridge2_s'].index
-    id_tt=body.vertex_groups['cf_J_Nose_t_s'].index
-
-    id_wl = body.vertex_groups['cf_J_NoseWing_tx_L'].index
-    id_wr = body.vertex_groups['cf_J_NoseWing_tx_R'].index
-    id_base = body.vertex_groups['cf_J_NoseBase_s'].index
-
-    v = vgroup(body,['cf_J_NoseWing_tx_L','cf_J_NoseWing_tx_R','cf_J_Nose_tip',
-        'cf_J_Nose_t_s',
-        'cf_J_Nostril_L','cf_J_Nostril_R',
-        'cf_J_Nose_Septum', 'cf_J_NoseBase_s'])
 
     #print(len(v), "candidate nostril verts")
     boy = (body['Boy']>0.0)
@@ -2106,7 +2306,7 @@ def paint_nostrils(arm, body):
         set_weight(body, x, id_tt, w_nose_t)
 
 
-def add_nostrils(arm, body):
+def add_nostrils(arm, body, bm):
     bpy.ops.object.mode_set(mode='OBJECT')
     bpy.context.view_layer.objects.active = arm
     make_child_bone(arm, 'cf_J_Nose_t', 'cf_J_Nostril_L', Vector([0.07, -0.065, 0.07]), "Nose")
@@ -2122,13 +2322,12 @@ def add_nostrils(arm, body):
     vgl = body.vertex_groups.new(name='cf_J_Nostril_L')
     vgr = body.vertex_groups.new(name='cf_J_Nostril_R')
     vgs = body.vertex_groups.new(name='cf_J_Nose_Septum')
-    paint_nostrils(arm, body)
+    paint_nostrils(arm, body, bm)
 
     bpy.context.view_layer.objects.active = body
     bpy.ops.paint.weight_paint_toggle()
     bpy.ops.object.vertex_group_clean(group_select_mode='ALL', limit=0.002)
     bpy.ops.paint.weight_paint_toggle()
-    #bm.free()
 
 # memorize coordinates and normals of all verts in T-pose (used by the skin generator, 
 # to correctly distribute skin pores and to tan upward-facing skin)
@@ -2155,33 +2354,286 @@ def add_t_pos(arm, body):
     attrn.data.foreach_set("vector", verts)
     bm.free()
 
-# Not enabled, WIP
+def get_linked_by_material(body, x, bm):
+    v=set({x})
+    mat = bm.verts[x].link_faces[0].material_index
+
+    v_out=set({x})
+    while len(v)>0:
+        v_next=set({})
+        for y in v:
+            for z in bm.verts[y].link_edges:
+                for w in z.verts:
+                    if w.index in v_out:
+                        continue
+                    if any([f.material_index==mat for f in w.link_faces]):
+                        v_next.add(w.index)
+        v_out = v_out | v_next
+        v = v_next
+    return v_out
+
+    """
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_all(action='DESELECT')
+    bpy.ops.object.mode_set(mode='OBJECT')
+    body.data.vertices[x].select = True
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_linked(delimit={'MATERIAL'})
+    bpy.ops.object.mode_set(mode='OBJECT')
+    v = [False]*len(body.data.vertices)
+    body.data.vertices.foreach_get("select", v)
+    return set([x for x in range(len(v)) if v[x]])
+    """
+
 def tweak_nails(arm, body):
+    t1=time.time()
     bpy.ops.object.mode_set(mode='OBJECT')
     bpy.context.view_layer.objects.active = body
+    for key in body.data.shape_keys.key_blocks:
+        key.value=0.0
+    body.active_shape_key_index = 0
+    arm.data.pose_position='REST'
+    body.modifiers["Armature"].show_in_editmode = False
+
+    body.data.vertices.update()
+
+    key_exists = "Nails" in body.data.shape_keys.key_blocks
+
+    if key_exists:
+        body.shape_key_remove(key=body.data.shape_keys.key_blocks["Nails"])
+    if "Long fingernails" in body.data.shape_keys.key_blocks:
+        body.shape_key_remove(key=body.data.shape_keys.key_blocks["Long fingernails"])
+    if "Long toenails" in body.data.shape_keys.key_blocks:
+        body.shape_key_remove(key=body.data.shape_keys.key_blocks["Long toenails"])
+
+    # Select every vertex in 'Nails' material
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.object.mode_set(mode='OBJECT')
     bpy.ops.object.mode_set(mode='EDIT')
     bpy.ops.mesh.select_mode(type='VERT')
     bpy.ops.mesh.select_all(action='DESELECT')
-    bpy.context.object.active_material_index = 1
-    bpy.ops.object.material_slot_select()
-    bpy.ops.mesh.region_to_loop()
-    bpy.ops.mesh.subdivide(number_cuts=2, smoothness=1)
 
-# Blur the transition from upper neck to head, making cf_J_FaceRoot_s somewhat more usable
-def repaint_upper_neck(arm, body):
-    print("Repainting upper neck ...")
-    vg = vgroup(body, ["cf_J_Head_s","cf_J_FaceRoot_s","cf_J_FaceRoot_r_s"])
-    for x in vg:
-        wf = get_weight(body, x, "cf_J_FaceRoot_s") 
-        wr = get_weight(body, x, "cf_J_FaceRoot_r_s")
-        w = get_weight(body, x, "cf_J_Head_s") + wf + wr
-        co = body.data.vertices[x].co
-        z = co[1]-15.348+(co[2]-0.08128)*0.2
-        span = 0.40 - 0.40*co[2]
-        set_weight(body, x, "cf_J_Head_s", w*sigmoid(z, 0, span))
-        rear_ratio = 1.-max(0,min(1,(co[2]+0.25)*2.))
-        set_weight(body, x, "cf_J_FaceRoot_s", w*(1.-sigmoid(z, 0, span))*(1.-rear_ratio))
-        set_weight(body, x, "cf_J_FaceRoot_r_s", w*(1.-sigmoid(z, 0, span))*rear_ratio)
+    material_index = 0
+    for i, slot in enumerate(body.material_slots):
+        if slot.material == body["nails_mat"]:
+            body.active_material_index = i
+            material_index = i
+            bpy.ops.object.material_slot_select()
+
+    # Extrude them inwards a bit
+    if not key_exists:
+        # do it twice to create two loops of vertices
+        bpy.ops.mesh.extrude_region_shrink_fatten(TRANSFORM_OT_shrink_fatten={"value":-0.001})
+        bpy.ops.mesh.extrude_region_shrink_fatten(TRANSFORM_OT_shrink_fatten={"value":-0.00001})
+        #bpy.ops.mesh.extrude_region_shrink_fatten(
+        #    MESH_OT_extrude_region={"use_normal_flip":False, "use_dissolve_ortho_edges":False, "mirror":False}, 
+        #    TRANSFORM_OT_shrink_fatten={"value":-0.001, "use_even_offset":False, "mirror":False, "use_proportional_edit":False, 
+        #    "proportional_edit_falloff":'SMOOTH', "proportional_size":1, "use_proportional_connected":False, "use_proportional_projected":False, 
+        #    "snap":False, "release_confirm":False, "use_accurate":False})
+        #
+        #bpy.ops.mesh.extrude_region_shrink_fatten(
+        #    MESH_OT_extrude_region={"use_normal_flip":False, "use_dissolve_ortho_edges":False, "mirror":False}, 
+        #    TRANSFORM_OT_shrink_fatten={"value":-0.00001, "use_even_offset":False, "mirror":False, "use_proportional_edit":False, 
+        #    "proportional_edit_falloff":'SMOOTH', "proportional_size":1, "use_proportional_connected":False, "use_proportional_projected":False, 
+        #    "snap":False, "release_confirm":False, "use_accurate":False})
+        bpy.ops.mesh.select_more()
+        bpy.ops.object.material_slot_assign()
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+    mask_full = [False]*len(body.data.vertices)
+    body.data.vertices.foreach_get("select", mask_full)
+    vs_full = set([x for x in range(len(mask_full)) if mask_full[x]])
+    bpy.ops.object.mode_set(mode='EDIT')
+
+    # Deselect rims (because get_linked_by_material() only works correctly
+    # when starting from a vertex entirely inside the nail)
+    for i, slot in enumerate(body.material_slots):
+        if slot.material == body["torso_mat"]:
+            body.active_material_index = i
+            bpy.ops.object.material_slot_deselect()
+
+    # Get the list of all 'core' nail vertices
+    bpy.ops.object.mode_set(mode='OBJECT')
+    mask = [False]*len(body.data.vertices)
+    body.data.vertices.foreach_get("select", mask)
+    vs = set([x for x in range(len(mask)) if mask[x]])
+
+    vs_rim = vs_full-vs
+
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_less()
+    bpy.ops.mesh.select_less()
+    bpy.ops.object.mode_set(mode='OBJECT')
+    mask2 = [False]*len(body.data.vertices)
+    body.data.vertices.foreach_get("select", mask2)
+    vs2 = set([x for x in range(len(mask2)) if mask2[x]])
+    vs_rim2 = vs - vs2
+
+    if not key_exists:
+        # If we are doing this for the first time on the char, mark nail rims as sharp and creased
+        bpy.ops.object.mode_set(mode='EDIT')
+        for i, slot in enumerate(body.material_slots):
+            if slot.material == body["nails_mat"]:
+                body.active_material_index = i
+                bpy.ops.object.material_slot_select()
+        bpy.ops.mesh.region_to_loop()
+        bpy.ops.mesh.mark_sharp()
+        bpy.ops.transform.edge_crease(value=1)
+
+    # Create the shape key
+    bpy.ops.object.mode_set(mode='OBJECT')
+    sk = body.shape_key_add(name="Nails")
+    sk.interpolation='KEY_LINEAR'
+    sk2 = body.shape_key_add(name="Long fingernails")
+    sk2.interpolation='KEY_LINEAR'
+    sk3 = body.shape_key_add(name="Long toenails")
+    sk3.interpolation='KEY_LINEAR'
+    for x in range(len(body.data.vertices)):
+        sk.data[x].co = body.data.shape_keys.key_blocks["Basis"].data[x].co
+        sk2.data[x].co = body.data.shape_keys.key_blocks["Basis"].data[x].co
+    sets = []
+    body.data.vertices.update()
+
+    bm = bmesh.new()
+    bm.from_mesh( body.data )
+    bm.verts.ensure_lookup_table()
+
+    while len(vs)>0:
+        body.data.vertices.update()
+        nail = get_linked_by_material(body, vs.pop(), bm)
+        sets.append(nail)
+        vs = vs-nail 
+
+    bm.free()
+    ext_sets = []
+    for nail in sets:
+        v0 = sum([body.data.vertices[x].normal for x in nail], Vector([0,0,0]))
+        v0.normalize()
+        c0 = sum([body.data.vertices[x].co for x in nail], Vector([0,0,0]))
+        c0 /= len(nail)
+
+        mat=Matrix([[0,0,0],[0,0,0],[0,0,0]])
+
+        toenail = abs(c0[0])<5.0
+        thumb = (v0[2]>0.5) and not toenail
+        scale = (1, 1.1, 0.95)
+        angle=0.08
+        if toenail:
+            v1 = Vector([1.0*(0.95-abs(c0[0]))*(1 if c0[0]>0 else -1), 0, 1])
+        elif thumb:
+            v1 = Vector([1 if c0[0]>0 else -1, 0, 0.3])
+        else:
+            v1 = Vector([1 if c0[0]>0 else -1, -0.10, 0.1*(c0[2]+0.20)])
+
+        # Doing this with bpy.ops.transform.resize/rotate/etc. does not work well (possible Blender bugs?)
+        v1.normalize()
+        v0 -= v1*v0.dot(v1)
+        v0.normalize()
+
+        v2 = v0.cross(v1)
+        offset = v1*0.006
+
+        for c in range(3):
+            v = Vector([0,0,0])
+            v[c] = 1.0
+            v = Vector([v.dot(v0), v.dot(v1), v.dot(v2)])
+            v = Vector([v[0]*scale[0], v[1]*scale[1], v[2]*scale[2]])
+            v = Vector([v[0]*math.cos(angle)-v[1]*math.sin(angle), v[0]*math.sin(angle)+v[1]*math.cos(angle), v[2]])
+            v = v0*v[0]+v1*v[1]+v2*v[2]
+            mat[c] = v
+
+        max_z = 0.0
+        max_x = 0.0
+        phi = 0.5
+
+        for x in nail:
+            co = body.data.shape_keys.key_blocks["Basis"].data[x].co.copy()
+
+            # Scale the nail bed by 1.1x lengthwise, 0.95x widthwise, 
+            # rotate it by 0.08 radians and move it towards the fingertip
+            co = (mat @ (co - c0)) + c0 + offset
+
+            dv = co-c0
+            r = dv.normalized()
+            dot = r.dot(v1)
+
+            # Flatten tips of the nails
+            dv -= v0*dv.dot(v0)*max(dot, 0.0)*0.5
+
+            # Basic (short nail) form
+            sk.data[x].co = c0+dv
+
+            # Long fingernails/toenails:
+            effect = Vector([0,0,0])
+
+            if dot>phi:
+                # Extrude the outer edge of the nail
+                if x in vs_rim:
+                    effect = v1*(dot-phi)*0.1 + v0*(dot-phi)*(-0.02 if toenail else 0.0)
+
+                # Move the next row of vertexes in the same direction
+                if x in vs_rim2:
+                    effect = v1*(dot-phi)*0.01 + v0*(dot-phi)*0.003
+
+                if toenail:
+                    sk3.data[x].co += effect
+                else:
+                    sk2.data[x].co += effect
+
+            max_z = max(max_z, (co-c0).dot(v1))
+            max_x = max(max_x, (co-c0).dot(v2))
+        ext_sets.append((nail, c0, v0, v1, v2, max_x, max_z))
+
+        for x in nail:
+            r = sk.data[x].co-c0
+
+            r.normalize()
+            dot = r.dot(v1)
+            phi = 0.5 if (thumb or toenail) else 0.66
+            if x in vs_rim or x in vs_rim2:
+                if dot>phi:
+                    if toenail:
+                        # Fix the weird shape of toenail front rims
+                        sk.data[x].co = c0 + r*max_z*(0.95 if x in vs_rim2 else 1.0)
+
+    bm = bmesh.new()
+    bm.from_mesh( body.data)
+    bm.verts.ensure_lookup_table()
+    bm.faces.ensure_lookup_table()
+
+    lay = bm.loops.layers.uv['uv1']
+    for nail, c0, v0, v1, v2, max_x, max_z in ext_sets:
+        toenail = abs(c0[0])<5.0
+        thumb = (v0[2]>0.5) and not toenail
+        for x in nail:
+            r = sk.data[x].co-c0
+            r.normalize()
+            dot = r.dot(v1)
+            phi = 0.5 if (thumb or toenail) else 0.66
+            #if dot>0.0:
+            if toenail:
+                uv = (0.954 + 0.034*(sk.data[x].co-c0).dot(v2)/max_x, 0.355 - 0.030 * (sk.data[x].co-c0).dot(v1)/max_z)
+            else:
+                uv = (0.892 + 0.014*(sk.data[x].co-c0).dot(v2)/max_x, 0.346 - 0.022 * (sk.data[x].co-c0).dot(v1)/max_z)
+            for loop in bm.verts[x].link_loops:
+                if loop.face.material_index == material_index:
+                    loop[lay].uv = uv
+
+    bm.to_mesh(body.data)
+    bm.free()
+
+    bpy.ops.object.mode_set(mode='OBJECT')
+    arm.data.pose_position='POSE'
+    body.modifiers["Armature"].show_in_editmode = True
+    bpy.context.view_layer.objects.active = arm
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+    sk.value = 1.0
+    sk2.value = 0.2
+    sk3.value = 0.2
+    #t1 = time.time()
+
 
 def insert_adapter_bone(arm, bone, adapter_name):
     old_parent = arm.data.bones[bone].parent
@@ -2198,3 +2650,50 @@ def add_helper_jc_bones(arm):
         insert_adapter_bone(arm, 'cf_J_LegLow01_s_'+s, 'cf_J_LegLow01_dam_'+s)
         insert_adapter_bone(arm, 'cf_J_LegLow02_s_'+s, 'cf_J_LegLow02_dam_'+s)
     bpy.ops.object.mode_set(mode='OBJECT')
+
+def repaint_upper_neck(arm, body):
+    vg = vgroup(body, ["cf_J_Head_s","cf_J_FaceRoot_s","cf_J_FaceRoot_r_s"])
+    for x in vg:
+        wf = get_weight(body, x, "cf_J_FaceRoot_s") 
+        wr = get_weight(body, x, "cf_J_FaceRoot_r_s")
+        w = get_weight(body, x, "cf_J_Head_s") + wf + wr
+        co = body.data.vertices[x].co
+        z = co[1]-15.348+(co[2]-0.08128)*0.2
+        span = 0.40 - 0.40*co[2]
+        set_weight(body, x, "cf_J_Head_s", w*sigmoid(z, 0, span))
+        rear_ratio = 1.-max(0,min(1,(co[2]+0.25)*2.))
+        set_weight(body, x, "cf_J_FaceRoot_s", w*(1.-sigmoid(z, 0, span))*(1.-rear_ratio))
+        set_weight(body, x, "cf_J_FaceRoot_r_s", w*(1.-sigmoid(z, 0, span))*rear_ratio)
+
+
+def repaint_head(arm, body):
+    bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.context.view_layer.objects.active = arm
+    
+    bm = bmesh.new()
+    bm.from_mesh(body.data)
+    bm.verts.ensure_lookup_table()
+    bm.edges.ensure_lookup_table()
+    bm.faces.ensure_lookup_table()
+
+    # Blur the transition from upper neck to head, making cf_J_FaceRoot_s somewhat more usable
+    repaint_upper_neck(arm, body)
+
+    # Above pupil level, partially transfer nose weight to faceup 
+    # (because, as painted, NoseBridge's effect extends well into the forehead)
+    repaint_nose_bridge(arm, body)
+
+    # Completely dissolve a pesky and inconvenient VG
+    #dissolve_facelow_s(arm, body, bm)
+
+    create_nasolabial(arm, body, bm)
+    create_nose_cheek(arm, body, bm)
+    restrict_nosebase(arm, body, bm)
+    jaw_edge(arm, body, bm)
+
+    #reassign_cheekup2(arm, body, bm)
+    create_chin_cheek(arm, body, bm)
+
+    add_nostrils(arm, body, bm)
+
+    bm.free()

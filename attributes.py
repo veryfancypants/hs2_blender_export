@@ -32,6 +32,7 @@ defaults={
     "IK": True,
     "Skin tone": Color([-1,-1,-1]),
     "Name": "Kitten",
+    "Fat": 0.0,
 }
 print(defaults) 
 
@@ -70,7 +71,7 @@ def set_equipment(h):
     h.pose.bones['dick_base'].location=Vector([0,-0.01*retract,0])
     h.pose.bones['stick_01'].location=Vector([0,-0.05*retract,0])
     bs=0.25+0.75*volume
-    h.pose.bones['balls'].scale=(bs,bs,bs)
+    h.pose.bones['balls'].scale=((bs+1)/2,bs,(bs+1)/2)
     h.pose.bones['balls'].location=(0, 0.10*(volume-1), 0)
     h.pose.bones['balls'].rotation_euler=Euler((15*(volume-1)*math.pi/180., 0, 0))
     width=0.5 + (width-0.25)*1.5
@@ -109,6 +110,58 @@ def set_equipment(h):
     # contracts the outer edge of the sheath if eagerness is low
     sheath.data.shape_keys.key_blocks["Key 1"].value = max(0., min(1., (0.75-x)*2.))
     
+
+def set_fat(arm, x):
+    torso_bones = [
+('cf_J_LegUp01_s_L',  0.100,   0.0,   0.093),
+('cf_J_LegUp02_s_L',  0.111,   0.0,   0.161),
+('cf_J_LegUp03_s_L',  0.070,   0.0,   0.063),
+('cf_J_LegLow01_s_L',  0.091,   0.0,   0.091),
+('cf_J_LegLow02_s_L',  0.151,   0.0,   0.117),
+('cf_J_LegLow03_s_L',  0.0,   0.0,   0.066),
+('cf_J_LegKnee_low_s_L',  0.0,   0.0,   0.0),
+('cf_J_Siri_s_L',  0.010,   0.0,   0.010,),
+('cf_J_Kosi01_f_s',  0.015,   0.0,   0.0),
+('cf_J_Kosi02_s',  0.027,   0.0,   0.028),
+('cf_J_Kosi01_s',  0.024,  .0 ,  0.000,),
+('cf_J_Spine01_s',  0.074,   0.0,   0.048),
+('cf_J_Spine02_s',  0.030,   0.0,   0.012),
+('cf_J_Spine03_s',  0.003,   0.0,   0.019),
+('cf_J_ArmUp01_s_L',  0.0,   0.081,   0.082),
+('cf_J_ArmUp02_s_L',  0.0,   0.136,   0.137),
+('cf_J_ArmUp03_s_L',  0.0,   0.013,   0.028),
+('cf_J_ArmLow01_s_L',  0.0,   0.060,   0.040),
+('cf_J_ArmLow02_s_L',  0.0,   0.100,   0.100),
+('cf_J_Hand_Wrist_s_L',  0.0, -0.020, -0.023),
+('cf_J_Neck_s', 0.100, 0.0, 0.100),
+('cf_J_FaceRoot_s', 0.100, 0.0, 0.100),
+('cf_J_FaceRoot_r_s', 0.100, 0.0, 0.100, "inv"),
+('cf_J_ChinLow', 0.0, 0.100, 0.0),
+    ]
+    if not "deformed_rig" in arm:
+        return
+    for b in torso_bones:
+        if not b[0] in arm["deformed_rig"]:
+            continue
+        if not b[0] in arm.pose.bones:
+            continue
+        null_scale = Matrix(arm["deformed_rig"][b[0]]).decompose()[2]
+        w0 = b[1]
+        w1 = b[2]
+        w2 = b[3]
+        if len(b)>4 and b[4]=="inv":
+            arm.pose.bones[b[0]].scale = Vector([null_scale[0]/(1+w0*x), null_scale[1]/(1+w1*x), null_scale[2]/(1+w2*x)])
+        else:
+            arm.pose.bones[b[0]].scale = Vector([null_scale[0]*(1+w0*x), null_scale[1]*(1+w1*x), null_scale[2]*(1+w2*x)])
+
+    if "cf_J_Spine01_f_s" in arm.pose.bones:
+        arm.pose.bones["cf_J_Spine01_f_s"].location[2] = 0.05*x*(0.5 if x>=0 else 1)
+    if "cf_J_Kosi01_f_s" in arm.pose.bones:
+        arm.pose.bones["cf_J_Kosi01_f_s"].location[2] = 0.10*x*(2 if x>=0 else 1)
+    #ab["cf_J_Kosi01_f_s"].scale[0] = 1+0.015*x
+    #ab["cf_J_Siri_s_L"].scale = Vector([1+x*0.1, 1, 1+fat*0.1])
+
+
 def set_attr(name, x):
     if not (name in defaults):
         print("ERROR: set_attr with unknown attribute", name)
@@ -122,6 +175,9 @@ def set_attr(name, x):
     h[name] = x
     if name == "Name":
         return
+
+    if name=="Fat":
+        set_fat(h, x)
 
     if name in ('Eagerness','Length', 'Girth','Volume'):
         set_equipment(h)
@@ -241,11 +297,15 @@ def push_mat_attributes(v):
     push_input_attr(v, torso_mat, "Torso bump scale 2", "Shader", "Bump scale 2")
 
     nails_mat = body["nails_mat"]
-    push_input_attr(v, nails_mat, "Nail color", "Principled BSDF", "Base Color")
+    push_input_attr(v, nails_mat, "Nail color", "Mix", "A")
 
     eye_mat = body["eye_mat"]
     push_value_attr(v, eye_mat, "Pupil size")
     push_value_attr(v, eye_mat, "Iris size")
+
+    for x in ["fat"]:
+        if x in v:
+            h[x] = float(v[x])
 
     for x in ["pore_depth", "pore_intensity", "pore_density", "Gloss", "Alternate skin"]:
         if x in v:
@@ -255,7 +315,7 @@ def push_mat_attributes(v):
                 body[x] = bool(v[x])
 
     for x in ['Eye shape', 'Adams apple delete', 'Upper lip trough', 'Lip arch', 'Eyelid crease', 'Temple depress',
-        'Jaw soften', 'Jaw soften more']:
+        'Jaw soften', 'Jaw soften more', 'Nasolabial crease', 'Nails', 'Long fingernails', 'Long toenails']:
         if x in body.data.shape_keys.key_blocks and x in v:
             body.data.shape_keys.key_blocks[x].value = float(v[x])
 
@@ -296,11 +356,15 @@ def collect_mat_attributes():
 
     nails_mat = body["nails_mat"]
     #print("nails_mat", nails_mat)
-    pull_input_attr(v, nails_mat, "Nail color", "Principled BSDF", "Base Color")
+    pull_input_attr(v, nails_mat, "Nail color", "Mix", "A")
 
     eye_mat = body["eye_mat"]
     pull_value_attr(v, eye_mat, "Pupil size")
     pull_value_attr(v, eye_mat, "Iris size")
+
+    for x in ["fat"]:
+        if x in h:
+            v[x] = h[x]
 
     for x in ["pore_depth", "pore_intensity", "pore_density", "Gloss", "Alternate skin"]:
         if isinstance(body[x], float) or isinstance(body[x], bool):
@@ -309,8 +373,8 @@ def collect_mat_attributes():
             v[x] = [float(y) for y in body[x]]
 
     for x in ['Eye shape', 'Adams apple delete', 'Upper lip trough', 'Lip arch', 'Eyelid crease', 'Temple depress',
-        'Jaw soften', 'Jaw soften more']:
+        'Jaw soften', 'Jaw soften more', 'Nasolabial crease', 'Nails', 'Long fingernails', 'Long toenails']:
         if x in body.data.shape_keys.key_blocks:
             v[x] = body.data.shape_keys.key_blocks[x].value
-    print(v)
+    #print(v)
     return v

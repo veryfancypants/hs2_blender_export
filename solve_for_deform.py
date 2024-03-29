@@ -12,12 +12,17 @@ import time
 # for x in range(len(target)):
 #       target[x].co = mats[x] @ undeformed[x].co
 #
-def np_solve(target, undeformed, np_mats):
+def np_solve(target, undeformed, np_mats, obj):
     np_undeformed = np.zeros([len(target)*3], dtype=np.float32)
     undeformed.foreach_get("co", np_undeformed)
     np_undeformed = np_undeformed.reshape([-1,3])
     np_undeformed = np.concatenate([np_undeformed, np.ones([np_undeformed.shape[0],1],dtype=np.float32)], axis=1)
     out = np.einsum("Bac,Bc->Ba",np_mats,np_undeformed)
+    print_count=0
+    for k in range(out.shape[0]):
+        if out[k,3]<0.00001 and print_count<5:
+            print(obj, k, out[k][3])
+            print_count+=1
     out = (out[:,:3]/out[:,3:]).reshape([-1])
     target.foreach_set("co", out)
 
@@ -59,9 +64,9 @@ def solve_for_deform(arm, b, b2):
         for y in b.data.shape_keys.key_blocks:
             target=b.data.shape_keys.key_blocks[y.name].data
             undeformed=b2.data.shape_keys.key_blocks[y.name].data
-            np_solve(target, undeformed, np_mats)
+            np_solve(target, undeformed, np_mats, b)
     else:
         target=b.data.vertices
         undeformed=b2.data.vertices
-        np_solve(target, undeformed, np_mats)
+        np_solve(target, undeformed, np_mats, b)
 

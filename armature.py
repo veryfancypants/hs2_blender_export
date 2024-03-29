@@ -463,11 +463,17 @@ def drive2(arm, target_bone, target_prop, target_component,
     var.targets[0].rotation_mode = order
     d.driver.expression = formula
 
-def copy_scale_self(arm, c):
-    drive(arm, c, "scale", 1, c, "SCALE_X", "var")
-    drive(arm, c, "scale", 2, c, "SCALE_X", "var")
-    arm.pose.bones[c].lock_scale[1]=True
-    arm.pose.bones[c].lock_scale[2]=True
+def copy_scale_self(arm, c, src=1):
+    if src==1:
+        drive(arm, c, "scale", 0, c, "SCALE_Y", "var")
+        drive(arm, c, "scale", 2, c, "SCALE_Y", "var")
+        arm.pose.bones[c].lock_scale[0]=True
+        arm.pose.bones[c].lock_scale[2]=True
+    elif src==0:
+        drive(arm, c, "scale", 1, c, "SCALE_X", "var")
+        drive(arm, c, "scale", 2, c, "SCALE_X", "var")
+        arm.pose.bones[c].lock_scale[1]=True
+        arm.pose.bones[c].lock_scale[2]=True
 
 
 def prettify_armature(arm, body):
@@ -830,7 +836,7 @@ def set_drivers(arm, extend_safe):
     # Non-uniform scales on these will lead to weird artifacts
     copy_scale_self(arm, "cf_N_height")
     copy_scale_self(arm, "cf_J_LegUp00_L")
-    copy_scale_self(arm, "cf_J_ArmUp00_L")
+    copy_scale_self(arm, "cf_J_ArmUp00_L", src=0)
     for s,sgn in (('L','-'),('R','')):
         # when twisting ArmUp00 (twist = along its length), gradient the effect from shoulder to elbow
         drive(arm, 'cf_J_ArmUp01_dam_' + s, 'rotation_euler', 0, 'cf_J_ArmUp00_'+s, 'ROT_X', '-0.75*var', order='SWING_TWIST_X') # changed from game -0.66
@@ -1127,7 +1133,6 @@ def load_unity_dump(dump):
             else:
                 if name=='cf_J_Root':
                     root_pos = [m[0][3],m[1][3],m[2][3]]
-                    print('Root ', root_pos)
                 m[0][3]-=root_pos[0]
                 m[1][3]-=root_pos[1]
                 m[2][3]-=root_pos[2]
@@ -1168,6 +1173,10 @@ def reshape_armature(path, arm, body, fallback, dumpfilename):
         m[2][3]+=-0.23
         default_rig[x]=m
 
+    #for b in ['Hallux', 'Long', 'Middle', 'Ring', 'Pinky']:
+    #    name = 'cf_J_Toes_' + b + '1_L'
+    #    print(name, arm.data.edit_bones[name].matrix - arm.data.edit_bones[name].parent.matrix)
+
     for b in arm.data.edit_bones:
         # corrupted armature in the dump?
         if (b.tail-b.head).length<1e-6 or not math.isfinite(b.tail[0]):
@@ -1186,11 +1195,17 @@ def reshape_armature(path, arm, body, fallback, dumpfilename):
         reshape_armature_fallback(arm, body, dumpfilename)
         return False
 
-        
     for x in arm.data.edit_bones:
         if not x.name in default_rig:
             #print(x.name, x.matrix)
-            default_rig[x.name] = x.matrix
+            #delta = Matrix([[0,0,0,0], [0,0,0,0], [0,0,0,0], [0,0,0,0]])
+            b = x.parent
+            while (b is not None) and (b.name not in default_rig):
+                b = b.parent
+            if b is None:
+                default_rig[x.name] = x.matrix
+            else:
+                default_rig[x.name] = default_rig[b.name] @ b.matrix.inverted() @ x.matrix
     arm["default_rig"] = default_rig
     #bpy.ops.object.mode_set(mode='EDIT')
 
