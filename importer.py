@@ -448,6 +448,9 @@ def load_textures(arm, body, hair_color, eye_color, suffix):
             if len(mesh.materials)>1:
                 print('Not trying to texture', x, ' - too many materials')
                 continue
+            if len(mesh.materials)==0:                
+                print('Not trying to texture', x, ' - no materials')
+                continue
             print('Trying to texture', x, 'as clothing')
             m = mesh.materials[0]
             n = m.name
