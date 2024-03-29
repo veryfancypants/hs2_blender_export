@@ -905,12 +905,23 @@ class hs2rig_OT_import(DirSelector):
         eye_color = (0.0, 0.0, 0.8)
         hair_color = (0.8, 0.8, 0.5)
         s = self.filepath
+        if not os.path.exists(s):
+            return {'FINISHED'}
+
+        # Correct the path in case the user selected something other than the whole export dir
+        if os.path.isfile(s):
+            s = os.path.dirname(s)
         while len(s) and (s[-1]=='/' or s[-1]=='\\'):
             s=s[:-1]
+        if os.path.basename(s).lower() == "textures":
+            s = os.path.dirname(s)
+
+        # Guess the character's name
         name = os.path.basename(s)
         while len(name) and (name[0].isdigit() or name[0]=='_'):
             name=name[1:]
-        arm=importer.import_body(self.filepath,
+
+        arm=importer.import_body(s,
             refactor=context.scene.hs2rig_data.refactor,
             do_extend_safe=context.scene.hs2rig_data.extend_safe,
             do_extend_full=context.scene.hs2rig_data.extend_full,
