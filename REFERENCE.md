@@ -31,7 +31,7 @@ On by default; a number of other features assume that refactoring is done, and w
 
 #### Operations
 
-All preset operations work with the JSON file, which is located in C:\Users\<user name>\AppData\Roaming\Blender Foundation\Blender\<version>\scripts\addons\hs2_blender_export-main\assets\hs2blender.json (Windows) or in /home/<user name>/.config/blender/<version>/scripts/addons/hs2_blender_export-main/assets/hs2blender.json (Linux).
+All preset operations work with the JSON file, which is located in C:\Users\\<user name\>\AppData\Roaming\Blender Foundation\Blender\\<version\>\scripts\addons\hs2_blender_export-main\assets\hs2blender.json (Windows) or in /home/\<user name\>/.config/blender/\<version\>/scripts/addons/hs2_blender_export-main/assets/hs2blender.json (Linux).
 
 * ''Reload presets'':  reload the preset .json, discarding any unsaved additions/deletions and any unsaved character changes (including names, colors, material attributes, shapes).
 * ''Save presets'': collect material attributes and shape keys for the currently selected character (if any) and put them into the preset; then save the preset .json with all edits.  A backup will be created in the same location.
