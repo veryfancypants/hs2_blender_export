@@ -2,6 +2,10 @@
 
 ### Settings
 
+#### Import settings
+ 
+These settings control behavior of "Load preset", "Load all presets", "Load favorites", and "Import new dump" operations.
+
 * ''Refactor armature'': recompute the armature so that all shape adjustments become parts of the rig (typically, as scales or offsets on non-deform bones). This makes hair and clothing (mostly) interchangeable between characters.
 
 On by default; a number of other features assume that refactoring is done, and will either break or be disabled if the setting is unchecked.
@@ -10,23 +14,40 @@ On by default; a number of other features assume that refactoring is done, and w
 
 * ''Extend (safe)'': add enhancements (bones, shape keys, weight repaints) which improve control over shape, but are not expected to change character appearance at their default settings. On by default.
 
-* ''Extend (full)'': add enhancements which _are_ expected to change character appearance. Create a few new facial bones that the user may need to tweak manually; create and turn on several shape keys.  Off by default.
+* ''Extend (full)'': add enhancements which _are_ expected to change character appearance. Create a few new facial bones that the user may need to tweak manually; create and turn on several shape keys. Only appears if "Refactor armature" is checked. Off by default.
+
+* ''Reweight clothing'': transfer weights from the torso to any clothing items covering the torso. This may be needed because several vertex groups are divided in the torso mesh (e.g. cf_J_Spine01_s -> cf_J_Spine01_f_s), and corresponding parts of the mesh may break through clothing if these bones are manipulated. 
 
 * ''Add an injector'': add a prefabricated injector to the mesh. A choice between 'On', 'Off', and 'Auto'. 'Auto' (default) enables the feature only if the character is male and does not have one already. 
   - If this feature is requested for a male character without an existing injector, the newly imported mesh will (hopefully) be attached seamlessly (the corresponding part of the original mesh will be excised and new mesh will be stitched in its place.) Otherwise, the new mesh will be joined to the original mesh and the process will stop there.
   - The prefabricated injector will be color-matched to the torso.
   - If a prefab injector is added, controls for its dimensions and readiness state will appear in the UI panel.
 
-* ''Add an exhaust'': add a prefabricated exhaust to the mesh. As with the injector, the importer will attempt seamless attachment; if it is successful, it will replace part of the original mesh, otherwise, it will merely join it to the existing mesh. A new 'Exhaust' control will be added to the UI panel: a slider from 0 (closed) to 10 (open to anatomically improbable levels) with the default of 1. 
+* ''Add an exhaust'': add a prefabricated exhaust to the mesh. As with the injector, the importer will attempt seamless attachment; if it is successful, it will replace part of the original mesh, otherwise, it will merely join it to the existing mesh. A new 'Exhaust' control will be added to the UI panel.
 
-### Operations
+* ''Subdivide'': apply one level of subdivision to critical areas of the mesh (currently face, hands, feet, and navel). Somewhat slow (will increase import time by 10-15 s even with a high-end CPU). Setting ignored if a high-poly (>60k face) mesh is detected.
+
+![Subdivide](https://github.com/veryfancypants/veryfancypants.github.io/blob/master/subdivide.jpg?raw=true)
+
+#### Operations
 
 All preset operations work with the JSON file, which is located in C:\Users\<user name>\AppData\Roaming\Blender Foundation\Blender\<version>\scripts\addons\hs2_blender_export-main\assets\hs2blender.json (Windows) or in /home/<user name>/.config/blender/<version>/scripts/addons/hs2_blender_export-main/assets/hs2blender.json (Linux).
 
 * ''Reload presets'':  reload the preset .json, discarding any unsaved additions/deletions and any unsaved character changes (including names, colors, material attributes, shapes).
-* ''Save presets'': save the preset .json with all edits
- A backup will be created in the same location.
-* ''Delete presets'': delete the currently selected preset. The result 
+* ''Save presets'': collect material attributes and shape keys for the currently selected character (if any) and put them into the preset; then save the preset .json with all edits.  A backup will be created in the same location.
+* ''Delete presets'': delete the currently selected preset. The result will remain in memory only, and ''Save presets'' must be executed to commit the result to the disk.
+
+* ''Save shape to preset'': collect all changes to shape bone scales/locations/etc. and store them in the preset. The result will remain in memory only, and ''Save presets'' must be executed to commit the result to the disk. Next time the same preset is loaded, these changes will be automatically applied.
+* ''Reset shape to vanilla'': revert all shape bone scales/locations/etc. to their values as originally imported from the game.
+* ''Load shape from preset'': revert all shape bone scales/locations/etc. to their values in the preset (that is, values in the original import, and any customizations previously made with ''Save shape to preset''.)
+
+The following controls appear when the active object is either a HS2 armature or one of the meshes parented to it:
+
+* ''Toggle clothing'': shows/hides all clothing and accessories. (May occasionally misidentify which meshes are clothing and which meshes are hair.)
+* ''Mouth open'': simple mouth open/close control. More precise control can be achieved with direct manipulation of shape keys and facial bones.
+* ''Exhaust'': appears if a prefabricated exhaust was added. Controls opening/closing the exhaust. Varies from 0 (closed) to 10 (open to anatomically improbable levels) with the default of 1. Works by setting scales on exhaust bones, so the same result can be achieved by scaling these bones manually.
+* ''Neuter'': appears if a prefabricated injector was added. Makes the injector mesh transparent. Prevents the injector from prominently poking through clothes.
+* ''IK'': enables IK. When checked, pose can be controlled by manipulating cf_J_Hand_IK_L/R, cf_J_Foot_IK_L/R, cf_J_Head_IK, and the pole bones for hands and feet (cf_J_Hand_P_L/R, cf_J_Foot_P_L/R). "_IK\_" bones directly move hands and feet, and pole bones control knee/elbow bend directions.
 
 ## Rig features
 
