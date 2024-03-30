@@ -27,7 +27,7 @@ On by default; a number of other features assume that refactoring is done, and w
 
 * ''Subdivide'': apply one level of subdivision to critical areas of the mesh (currently face, hands, feet, and navel). Somewhat slow (will increase import time by 10-15 s even with a high-end CPU). Setting ignored if a high-poly (>60k face) mesh is detected.
 
-![Subdivide](https://github.com/veryfancypants/veryfancypants.github.io/blob/master/subdivide.jpg?raw=true)
+![Subdivide](https://github.com/veryfancypants/veryfancypants.github.io/blob/master/subdivision.jpg?raw=true)
 
 #### Operations
 
